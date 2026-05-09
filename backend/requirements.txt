@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+gunicorn
+python-dotenv
+httpx
+openai
+python-multipart
+python-whois==0.9.6
+beautifulsoup4
+filetype
+pytesseract
+Pillow
+PyYAML
+ruff
+pytest
+httpx
+pytest-asyncio
