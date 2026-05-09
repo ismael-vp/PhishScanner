@@ -4,7 +4,7 @@
 
 > **Importante**
 >
-> PhishingScanner interactúa con recursos de red potencialmente maliciosos. Sanitiza las entradas en entornos de producción, nunca abras enlaces sospechosos directamente en tu máquina y protege estrictamente tus claves de API (VirusTotal, OpenAI).
+> PhishingScanner interactúa con recursos de red potencialmente maliciosos. Sanitiza las entradas en entornos de producción, nunca abras enlaces sospechosos directamente en tu máquina.
 
 PhishingScanner es un ecosistema de ciberseguridad diseñado para detectar phishing y malware en URLs e imágenes. Combina OSINT, más de 90 motores antivirus y el razonamiento de GPT-4o-mini para transformar datos técnicos complejos en reportes claros e interactivos.
 
