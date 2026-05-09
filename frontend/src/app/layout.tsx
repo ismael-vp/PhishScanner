@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ThreatAnalyzer - Análisis de Amenazas",
-  description: "Escanea enlaces sospechosos o archivos en segundos con ThreatAnalyzer",
+  title: "PhishingScanner",
+  description: "Escanea enlaces sospechosos o imágenes en segundos con PhishingScanner",
 };
 
 export default function RootLayout({

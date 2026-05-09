@@ -1,4 +1,4 @@
-# PhishScanner Backend - Production Dockerfile
+# PhishingScanner Backend - Production Dockerfile
 FROM python:3.11-slim
 
 # Evitar que Python genere archivos .pyc y forzar logs en tiempo real

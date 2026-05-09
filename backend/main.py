@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
     """
     Gestor del ciclo de vida de la aplicación.
     """
-    logger.info("🚀 Iniciando motor de PhishScanner API...")
+    logger.info("🚀 Iniciando motor de PhishingScanner API...")
     
     # Verificación de seguridad al arrancar (Fail-Fast pattern)
     if not os.getenv("VT_API_KEY"):
@@ -32,11 +32,11 @@ async def lifespan(app: FastAPI):
         
     yield  # El servidor está corriendo
     
-    logger.info("🛑 Apagando PhishScanner API de forma segura. Liberando recursos...")
+    logger.info("🛑 Apagando PhishingScanner API de forma segura. Liberando recursos...")
 
 # Inicializar aplicación FastAPI
 app = FastAPI(
-    title="PhishScanner API",
+    title="PhishingScanner API",
     description="Motor de análisis avanzado para Phishing, Typosquatting y Malware",
     version="1.0.0",
     lifespan=lifespan
@@ -84,7 +84,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def health_check():
     return {
         "status": "API operativa", 
-        "engine": "PhishScanner Core v1.0",
+        "engine": "PhishingScanner Core v1.0",
         "environment": os.getenv("ENVIRONMENT", "development")
     }
 
