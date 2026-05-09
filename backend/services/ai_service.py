@@ -19,9 +19,12 @@ class AIService:
         if not self.client:
             raise HTTPException(status_code=500, detail="La API Key de OpenAI no está configurada.")
 
-        # Calculamos estadísticas clave para que la IA sea precisa
+        # Calculamos estadísticas clave de forma segura (solo campos numéricos)
         total_alerts = vt_stats.get('malicious', 0) + vt_stats.get('suspicious', 0)
-        total_engines = sum(vt_stats.values())
+        
+        # Sumamos solo los campos que sabemos que son contadores para evitar errores
+        keys_to_sum = ['malicious', 'suspicious', 'undetected', 'harmless', 'timeout']
+        total_engines = sum(vt_stats.get(k, 0) for k in keys_to_sum if isinstance(vt_stats.get(k), (int, float)))
 
         # Convertimos las estadísticas a string formateado
         stats_str = json.dumps(vt_stats, indent=2)
