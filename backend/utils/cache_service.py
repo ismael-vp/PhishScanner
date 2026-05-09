@@ -61,3 +61,14 @@ class CacheService:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM scan_cache WHERE key = ? AND type = ?", (key, cache_type))
             conn.commit()
+
+    def clear_all(self):
+        """Borra absolutamente toda la caché almacenada."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM scan_cache")
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing all cache: {e}")
+            return False

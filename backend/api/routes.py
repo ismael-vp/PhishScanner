@@ -182,3 +182,12 @@ async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@router.post("/api/admin/clear-cache", tags=["Admin"])
+async def clear_cache():
+    """Limpia manualmente toda la base de datos de caché."""
+    success = cache_service.clear_all()
+    if success:
+        return {"status": "success", "message": "Caché eliminada correctamente."}
+    else:
+        raise HTTPException(status_code=500, detail="No se pudo eliminar la caché.")
+
