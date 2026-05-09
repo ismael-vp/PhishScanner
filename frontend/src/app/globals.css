@@ -39,3 +39,16 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Animación de puntos saltando para el estado de carga */
+@keyframes dot-jump {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(-5px); opacity: 1; }
+}
+
+.animate-dot-jump {
+  animation: dot-jump 0.8s infinite ease-in-out;
+}
+
+.delay-200 { animation-delay: 0.2s; }
+.delay-400 { animation-delay: 0.4s; }

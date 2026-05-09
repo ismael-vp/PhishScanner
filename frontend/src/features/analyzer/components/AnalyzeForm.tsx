@@ -247,12 +247,12 @@ export default function AnalyzeForm() {
           >
             {isScanning ? (
               <div className="flex items-center space-x-3">
-                <div className="flex space-x-1">
-                  <div className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                  <div className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                  <div className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce"></div>
+                <div className="flex space-x-1.5">
+                  <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-dot-jump"></div>
+                  <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-dot-jump delay-200"></div>
+                  <div className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-dot-jump delay-400"></div>
                 </div>
-                <span className="text-zinc-400 font-normal">Analizando amenaza...</span>
+                <span className="text-zinc-400 font-normal">Analizando</span>
               </div>
             ) : (
               <span>

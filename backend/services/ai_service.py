@@ -19,9 +19,9 @@ class AIService:
         if not self.client:
             raise HTTPException(status_code=500, detail="La API Key de OpenAI no está configurada.")
 
-        # Calculamos el total de alertas (maliciosos + sospechosos) para que la IA
-        # utilice exactamente el mismo número que muestra el banner de la interfaz.
+        # Calculamos estadísticas clave para que la IA sea precisa
         total_alerts = vt_stats.get('malicious', 0) + vt_stats.get('suspicious', 0)
+        total_engines = sum(vt_stats.values())
 
         # Convertimos las estadísticas a string formateado
         stats_str = json.dumps(vt_stats, indent=2)
@@ -34,8 +34,8 @@ class AIService:
             "1. Tu respuesta debe ser estrictamente un objeto JSON.\n"
             "2. El JSON debe tener exactamente esta estructura: "
             '{"summary": "Resumen ejecutivo en 1 o 2 oraciones máximo.", "action_steps": ["Paso 1", "Paso 2", "Paso 3"]}.\n'
-            f"3. IMPORTANTE: Debes basar tu resumen en que hay exactamente {total_alerts} motores que han levantado "
-            "alertas en total (maliciosos + sospechosos combinados).\n"
+            f"3. IMPORTANTE: Debes mencionar que se han analizado un total de {total_engines} motores de seguridad, "
+            f"de los cuales exactamente {total_alerts} han levantado alertas (maliciosos + sospechosos combinados).\n"
             "4. En 'summary', sé extremadamente conciso, directo y técnico (estilo informe ejecutivo). "
             "Ejemplo ideal: 'El consenso de X motores de seguridad (incluyendo Kaspersky) clasifica esta URL como una amenaza de phishing. Adicionalmente, el análisis heurístico detecta patrones de comportamiento evasivo que confirman el riesgo.' "
             "Evita usar palabras de relleno. Si el enlace es seguro, simplemente indica que no hay motores que hayan detectado problemas de seguridad.\n"
@@ -45,6 +45,7 @@ class AIService:
         user_prompt = (
             f"El recurso escaneado es un(a): {resource_type}.\n\n"
             f"Total de motores que han levantado alertas (maliciosos + sospechosos): {total_alerts}.\n\n"
+            f"Total de motores consultados en total: {total_engines}.\n\n"
             f"Estadísticas completas de detección:\n{stats_str}"
         )
 
