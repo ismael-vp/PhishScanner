@@ -14,7 +14,7 @@ export default function SecurityVerdict({ scanResult }: SecurityVerdictProps) {
 
   const isDangerous =
     hasAntivirusAlerts ||
-    (osint?.abuseConfidenceScore && osint.abuseConfidenceScore > 0) ||
+    (osint?.abuseConfidenceScore && osint.abuseConfidenceScore >= 25) ||
     osint?.is_typosquatting ||
     osint?.has_dangerous_form ||
     osint?.url_anatomy?.hosting_brand_alert ||
