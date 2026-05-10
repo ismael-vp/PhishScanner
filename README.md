@@ -2,10 +2,6 @@
 
 [![Versión](https://img.shields.io/badge/versión-v1.0.0-blue)](#) [![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](#) [![FastAPI](https://img.shields.io/badge/FastAPI-Python-009688?logo=fastapi)](#) [![Docker](https://img.shields.io/badge/Docker-Soportado-2496ED?logo=docker)](#)
 
-> **Importante**
->
-> PhishingScanner interactúa con recursos de red potencialmente maliciosos. Sanitiza las entradas en entornos de producción, nunca abras enlaces sospechosos directamente en tu máquina.
-
 PhishingScanner es un ecosistema diseñado para detectar phishing y malware en URLs e imágenes. Combina OSINT, más de 90 motores antivirus y el razonamiento de GPT-4o-mini para transformar datos técnicos complejos en reportes claros e interactivos.
 
 Actualmente soporta el análisis de:
