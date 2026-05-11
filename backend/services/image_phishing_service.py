@@ -2,6 +2,7 @@ import io
 import json
 import re
 import os
+import asyncio # NUEVO: Importar asyncio para manejar hilos
 from fastapi import HTTPException
 from utils.openai_client import get_openai_client
 
@@ -87,8 +88,9 @@ class ImagePhishingService:
                 detail="La API Key de OpenAI no está configurada."
             )
 
-        # Step 1: Extract text with OCR
-        extracted_text = self.extract_text_from_image(image_bytes)
+        # 🚀 CORRECCIÓN: Step 1: Extract text with OCR sin bloquear el Event Loop
+        # Delegamos la tarea síncrona (CPU-bound) a un hilo secundario.
+        extracted_text = await asyncio.to_thread(self.extract_text_from_image, image_bytes)
 
         if not extracted_text or len(extracted_text.strip()) < 10:
             return {

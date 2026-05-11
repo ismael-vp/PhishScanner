@@ -1,12 +1,16 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Body
+import os
+import logging
+import hashlib
+from fastapi import APIRouter, File, UploadFile, HTTPException, Body, Header
 from pydantic import BaseModel
 from services.virustotal_service import VirusTotalService
 from services.ai_service import AIService
 from services.osint_service import OSINTService
 from services.image_phishing_service import ImagePhishingService
 from utils.cache_service import CacheService
-import hashlib
 
+# Configurar logger para evitar exponer errores al cliente
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -59,9 +63,7 @@ async def analyze_url(request: URLRequest = Body(...)):
                 is_suspicious_osint = True
                 heuristic_reasons.append(f"Estructura de URL maliciosa (Score: {url_struct.risk_score}/100)")
 
-
             if is_suspicious_osint:
-
                 vt_stats["suspicious"] = vt_stats.get("suspicious", 0) + 1
                 vt_stats["heuristic_flag"] = " | ".join(heuristic_reasons)
         
@@ -86,10 +88,12 @@ async def analyze_url(request: URLRequest = Body(...)):
         # Dejar pasar excepciones controladas HTTP (e.g. 404 de VT o 429 de límite de API)
         raise e
     except Exception as e:
+        # NUEVO: Prevenir Information Disclosure. Se loguea el error real, pero no se envía al frontend.
+        logger.error(f"Error no controlado en analyze_url: {e}", exc_info=True)
         return {
             "type": "url",
             "status": "error",
-            "message": str(e)
+            "message": "Se produjo un error interno al procesar la URL."
         }
 
 
@@ -138,7 +142,9 @@ async def analyze_image(file: UploadFile = File(...)):
     except HTTPException as e:
         raise e
     except Exception as e:
-        return {"type": "image", "status": "error", "message": str(e)}
+        logger.error(f"Error no controlado en analyze_image: {e}", exc_info=True)
+        return {"type": "image", "status": "error", "message": "Se produjo un error interno al procesar la imagen."}
+
 
 class ChatRequest(BaseModel):
     messages: list
@@ -152,20 +158,20 @@ async def chat_endpoint(request: ChatRequest = Body(...)):
         
         # Eliminar recursivamente o en profundidad los datos que no aportan al chat
         if "osint_data" in clean_context and isinstance(clean_context["osint_data"], dict):
-            # En caso de que sea un dict (a veces pydantic lo envía como dict)
             clean_context["osint_data"] = {k: v for k, v in clean_context["osint_data"].items() if k != "html_content"}
         
-        # También removemos los resultados completos de los motores si son muchos
         if "stats" in clean_context and isinstance(clean_context["stats"], dict) and "full_results" in clean_context["stats"]:
-            # Solo guardamos los primeros 5 o quitamos la lista para ahorrar tokens
             clean_context["stats"]["full_results"] = clean_context["stats"]["full_results"][:5]
 
         reply = await ai_service.chat_with_context(request.messages, clean_context)
         return {"reply": reply}
+        
     except HTTPException as e:
         raise e
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Error no controlado en chat_endpoint: {e}", exc_info=True)
+        return {"status": "error", "message": "No se pudo procesar la consulta con la IA."}
+
 
 class ScriptExplainRequest(BaseModel):
     script_url: str
@@ -180,14 +186,23 @@ async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):
     except HTTPException as e:
         raise e
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Error no controlado en explain_script: {e}", exc_info=True)
+        return {"status": "error", "message": "Error interno al analizar el script."}
 
+
+# NUEVO: Protección del Endpoint de Administración mediante Header Authentication
 @router.post("/api/admin/clear-cache", tags=["Admin"])
-async def clear_cache():
-    """Limpia manualmente toda la base de datos de caché."""
+async def clear_cache(x_admin_key: str = Header(..., description="Clave de acceso de administrador")):
+    """Limpia manualmente toda la base de datos de caché. Requiere autenticación."""
+    admin_secret = os.getenv("ADMIN_SECRET_KEY")
+    
+    # Validamos que exista una clave configurada en el servidor y que coincida con la enviada
+    if not admin_secret or x_admin_key != admin_secret:
+        logger.warning("Intento de acceso denegado a /api/admin/clear-cache.")
+        raise HTTPException(status_code=403, detail="Acceso denegado: Credenciales no válidas.")
+
     success = cache_service.clear_all()
     if success:
         return {"status": "success", "message": "Caché eliminada correctamente."}
     else:
         raise HTTPException(status_code=500, detail="No se pudo eliminar la caché.")
-

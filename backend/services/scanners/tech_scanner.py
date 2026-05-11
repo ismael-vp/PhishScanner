@@ -1,8 +1,8 @@
 import httpx
 import re
 import logging
-import yaml
-import os
+import socket
+import ipaddress
 import asyncio
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
@@ -10,7 +10,29 @@ from models.osint_models import TechData, PrivacyData
 
 logger = logging.getLogger(__name__)
 
-
+# --- NUEVO: Función de seguridad para evitar SSRF ---
+def is_safe_url(url: str) -> bool:
+    """
+    Verifica que la URL apunte a una IP pública y no a redes internas, 
+    localhost o IPs reservadas.
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'): 
+            return False
+        
+        # Extraemos el hostname (eliminando el puerto si lo hubiera)
+        hostname = parsed.netloc.split(':')[0]
+        
+        # Resolvemos el dominio a IP
+        ip = socket.gethostbyname(hostname)
+        ip_obj = ipaddress.ip_address(ip)
+        
+        # Bloquear IPs privadas, de loopback y reservadas
+        return not (ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved)
+    except Exception as e:
+        logger.warning(f"Error resolviendo DNS para {url}: {e}")
+        return False
 
 
 class TechScanner:
@@ -21,6 +43,9 @@ class TechScanner:
         Esta función contiene todo el código que estresa la CPU.
         Al separarlo aquí, podemos enviarlo a un hilo secundario y evitar que FastAPI se congele.
         """
+        # --- NUEVO: Solución al error de variable no definida ---
+        html_lower = html_content.lower()
+        
         # --- 1. Parsing del DOM ---
         soup = BeautifulSoup(html_content, "html.parser")
         scripts = soup.find_all("script", src=True)
@@ -39,9 +64,8 @@ class TechScanner:
 
         external_scripts = list(set(external_scripts))
 
-        # --- 2. Detección de Tecnologías (ELIMINADO: Demasiado pesado e innecesario) ---
+        # --- 2. Detección de Tecnologías (ELIMINADO) ---
         technologies = []
-
 
         # --- 3. Privacy Nutrition Label (Detección de Rastreadores) ---
         privacy = PrivacyData()
@@ -137,30 +161,50 @@ class TechScanner:
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
 
+            # --- NUEVO: Verificación SSRF ---
+            if not is_safe_url(url):
+                logger.warning(f"Intento de SSRF bloqueado. URL no segura: {url}")
+                return result # Devolvemos el objeto vacío en lugar de escanear
+            
             req_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             
-            # Petición de red (I/O). Aquí `await` es correcto y cede el control limpiamente.
-            async with httpx.AsyncClient(verify=False) as client:
-                response = await client.get(url, follow_redirects=True, timeout=10.0, headers=req_headers)
+            # --- NUEVO: verify=True (Seguridad SSL) y protección contra DoS limitando la descarga ---
+            async with httpx.AsyncClient(verify=True) as client:
+                # Usamos stream para no cargar payloads gigantes en memoria
+                async with client.stream("GET", url, follow_redirects=True, timeout=10.0, headers=req_headers) as response:
+                    
+                    # Chequeo rápido de headers si el servidor declara el tamaño
+                    content_length = response.headers.get("Content-Length")
+                    if content_length and int(content_length) > 2 * 1024 * 1024:
+                        logger.warning(f"Payload demasiado grande reportado por el servidor: {url}")
+                        return result
+                    
+                    chunks = []
+                    bytes_read = 0
+                    
+                    # Leemos los chunks poco a poco
+                    async for chunk in response.aiter_bytes():
+                        bytes_read += len(chunk)
+                        if bytes_read > 2 * 1024 * 1024: # Límite estricto de 2MB
+                            logger.warning(f"Se excedió el límite de 2MB leyendo: {url}")
+                            break
+                        chunks.append(chunk)
+                        
+                    html_content = b"".join(chunks).decode("utf-8", errors="ignore")
+                    
+                    result.html_content = html_content 
+                    response_headers = dict(response.headers)
+                    cookies_dict = dict(response.cookies)
 
-            html_content = response.text
-            result.html_content = html_content 
-            response_headers = dict(response.headers)
-            cookies_dict = dict(response.cookies)
-
-            redirect_chain = [str(req.url) for req in response.history]
-            redirect_chain.append(str(response.url))
-            result.redirect_chain = redirect_chain
+                    redirect_chain = [str(req.url) for req in response.history]
+                    redirect_chain.append(str(response.url))
+                    result.redirect_chain = redirect_chain
 
         except Exception as e:
             logger.warning(f"Error al conectar por HTTP con {url}: {e}")
             return result
             
         try:
-            # 🚀 LA MAGIA OCURRE AQUÍ 🚀
-            # En lugar de bloquear el servidor ejecutando las expresiones regulares de forma síncrona,
-            # delegamos TODO ese bloque de código de arriba a un hilo en segundo plano.
-            # 🚀 LA MAGIA OCURRE AQUÍ 🚀
             # Delegamos el análisis de privacidad (que aún tiene regex) a un hilo secundario
             external_scripts, technologies, privacy = await asyncio.to_thread(
                 TechScanner._cpu_bound_analysis,
@@ -169,7 +213,6 @@ class TechScanner:
                 cookies_dict,
                 hostname
             )
-
 
             result.external_scripts = external_scripts
             result.technologies = technologies

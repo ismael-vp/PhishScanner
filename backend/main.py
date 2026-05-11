@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -62,12 +62,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- ESCUDO CONTRA FUGAS DE DATOS (Global Exception Handler) ---
+# --- ESCUDO CONTRA FUGAS DE DATOS (Exception Handlers) ---
+
+# NUEVO: Interceptor de errores HTTP
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Intercepta errores HTTP controlados. 
+    Permite mostrar detalles al usuario para errores de cliente (4xx), 
+    pero enmascara los errores de servidor (5xx) para evitar Information Disclosure.
+    """
+    if exc.status_code >= 500:
+        # Logueamos el error real internamente para depuración
+        logger.error(f"⚠️ HTTP ERROR {exc.status_code} en {request.url.path}: {exc.detail}")
+        
+        # Devolvemos un mensaje genérico al frontend
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": "Error interno en los servicios de escaneo. El incidente ha sido registrado.",
+                "status": "error"
+            }
+        )
+    
+    # Para errores 4xx (ej. URL inválida, archivo muy grande), devolvemos el detalle
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "status": "error"
+        }
+    )
+
+# MANTENIDO: Interceptor de crasheos generales
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """
-    Captura cualquier error imprevisto para evitar que el servidor filtre 
-    información técnica sensible (rutas locales, versiones, etc.) al cliente.
+    Captura cualquier crasheo imprevisto (no HTTP) para evitar que el servidor 
+    filtre información técnica sensible (rutas locales, versiones, etc.) al cliente.
     """
     logger.error(f"⚠️ ERROR CRÍTICO NO CONTROLADO en {request.url.path}: {str(exc)}")
     logger.error(traceback.format_exc())
@@ -75,7 +107,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
-            "detail": "Error interno del servidor. El incidente ha sido registrado para revisión técnica.",
+            "detail": "Error crítico interno del servidor. El incidente ha sido registrado para revisión técnica.",
             "status": "error"
         }
     )
