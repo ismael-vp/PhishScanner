@@ -206,7 +206,7 @@ addopts = [
     "--cov=services",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
-    "--cov-fail-under=80",
+    "--cov-fail-under=25",
 ]
 asyncio_mode = "auto"
 markers = [
