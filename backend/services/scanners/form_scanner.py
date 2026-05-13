@@ -132,7 +132,7 @@ class FormScanner:
     def _analyze_forms_sync(
         html_content: str,
         hostname: str,
-        url_anatomy: UrlAnatomyData | None = None
+        url_anatomy: "UrlAnatomyData | None" = None
     ) -> FormData:
         """Versión síncrona del análisis."""
         result = FormData()

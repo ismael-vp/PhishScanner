@@ -92,7 +92,7 @@ class OSINTService:
                 form_data = await FormScanner.analyze_forms(
                     osint_data.tech_data.html_content,
                     hostname,
-                    heuristic_result.url_anatomy
+                    osint_data.url_anatomy  # UrlAnatomyData — tiene suspicious_tld, is_dga_suspect, etc.
                 )
                 if form_data:
                     osint_data.form_analysis = form_data
