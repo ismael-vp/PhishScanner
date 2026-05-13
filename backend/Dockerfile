@@ -27,7 +27,9 @@ RUN groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid appgroup --shell /bin/false --create-home appuser
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr=4.1.1-2.1 \
+    tesseract-ocr \
+    tesseract-ocr-spa \
+    tesseract-ocr-eng \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
