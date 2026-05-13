@@ -109,15 +109,31 @@ export default function AnalyzeForm() {
 
       if (axios.isAxiosError(err) && err.response && err.response.data && err.response.data.detail) {
         const detail = err.response.data.detail;
+
+        const toUserMessage = (raw: string): string => {
+          // Eliminar el prefijo técnico que añade Pydantic v2
+          const clean = raw.replace(/^Value error,\s*/i, '').trim();
+          // Normalizar mensajes técnicos de seguridad a texto amigable
+          if (clean.toLowerCase().includes('ssrf') || clean.toLowerCase().includes('no es segura')) {
+            return 'La URL introducida no es válida o no se puede analizar.';
+          }
+          if (clean.toLowerCase().includes('dominio válido') || clean.toLowerCase().includes('netloc')) {
+            return 'La URL no contiene un dominio válido. Asegúrate de incluir el protocolo (https://...).';
+          }
+          if (clean.toLowerCase().includes('http') && clean.toLowerCase().includes('protocolo')) {
+            return 'La URL debe empezar por https:// o http://.';
+          }
+          return clean;
+        };
+
         if (Array.isArray(detail)) {
-          // Si es un error de validación de Pydantic, extraemos el mensaje del primer error
           const firstError = detail[0];
-          setError(firstError.msg || "Error de validación en los datos enviados.");
+          setError(toUserMessage(firstError.msg || 'Error de validación en los datos enviados.'));
         } else {
-          setError(String(detail));
+          setError(toUserMessage(String(detail)));
         }
       } else {
-        setError("Error de conexión con el servidor. ¿Está el backend encendido?");
+        setError('Error de conexión con el servidor. ¿Está el backend encendido?');
       }
     }
 
