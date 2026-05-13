@@ -106,8 +106,7 @@ class OSINTService:
         osint_data.screenshot_desktop = f"https://api.microlink.io/?url={encoded_url}&screenshot=true&embed=screenshot.url&viewport.width=1920&viewport.height=1080&userAgent={quote(ua_desktop)}"
         
         try:
-            js_script = "() => { return { isBursting: document.body.scrollWidth > window.innerWidth + 20 }; }"
-            microlink_url = f"https://api.microlink.io/?url={encoded_url}&screenshot=true&device=iPhone+13&userAgent={quote(ua_mobile)}&function={quote(js_script)}"
+            microlink_url = f"https://api.microlink.io/?url={encoded_url}&screenshot=true&device=iPhone+13&userAgent={quote(ua_mobile)}"
             
             async with httpx.AsyncClient(timeout=25.0) as client:
                 response = await client.get(microlink_url)
@@ -116,10 +115,6 @@ class OSINTService:
                     shot_url = api_data.get("screenshot", {}).get("url")
                     if shot_url:
                         osint_data.screenshot_mobile = shot_url
-                    
-                    fn_result = api_data.get("function", {}).get("value", {})
-                    if isinstance(fn_result, dict):
-                        osint_data.is_mobile_optimized = not fn_result.get("isBursting", False)
                     
                     real_title = api_data.get("title", "").strip().lower()
                     if real_title and osint_data.tech_data and osint_data.tech_data.html_content:

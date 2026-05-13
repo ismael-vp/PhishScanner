@@ -20,6 +20,18 @@ MAX_OCR_CHARS = int(os.getenv("MAX_OCR_CHARS", "3000"))
 MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "3"))
 RETRY_BASE_DELAY = float(os.getenv("AI_RETRY_BASE_DELAY", "1.0"))
 
+# response_format=json_object solo soportado por la API oficial de OpenAI
+_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").lower()
+_SUPPORTS_JSON_MODE = "openai.com" in _base_url
+_JSON_RESPONSE_FORMAT: dict = {"type": "json_object"} if _SUPPORTS_JSON_MODE else {}
+
+_RE_MARKDOWN_JSON = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
+
+def _strip_markdown_json(text: str) -> str:
+    """Elimina bloques ```json ... ``` que algunos proxies añaden a la respuesta."""
+    match = _RE_MARKDOWN_JSON.match(text.strip())
+    return match.group(1).strip() if match else text.strip()
+
 TESSERACT_CONFIG = os.getenv(
     "TESSERACT_CONFIG",
     r"--oem 3 --psm 6 -l spa+eng"
@@ -177,9 +189,16 @@ class ImagePhishingService:
     """Servicio de análisis de imágenes para detección de phishing."""
 
     def __init__(self):
-        self.client = get_openai_client()
-        if not self.client:
-            logger.error("Cliente de IA no inicializado.")
+        self._client = None
+
+    @property
+    def client(self):
+        """Lazy init: crea el cliente la primera vez que se necesita."""
+        if self._client is None:
+            self._client = get_openai_client()
+            if not self._client:
+                logger.error("Cliente de IA no inicializado.")
+        return self._client
 
     async def extract_text_from_image(self, image_bytes: bytes) -> str:
         """Extrae texto de imagen vía OCR."""
@@ -246,7 +265,7 @@ class ImagePhishingService:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    response_format={"type": "json_object"},
+                    **({"response_format": _JSON_RESPONSE_FORMAT} if _JSON_RESPONSE_FORMAT else {}),
                     temperature=AI_TEMPERATURE,
                     max_tokens=AI_MAX_TOKENS,
                 )
@@ -265,6 +284,9 @@ class ImagePhishingService:
                     status_code=502,
                     detail="La IA retornó una respuesta vacía."
                 )
+
+            # Eliminar bloques Markdown si el proxy no soporta json_object
+            content = _strip_markdown_json(content)
 
             try:
                 parsed = json.loads(content)

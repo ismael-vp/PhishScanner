@@ -24,6 +24,12 @@ MAX_MESSAGE_LENGTH = int(os.getenv("AI_MAX_MESSAGE_LENGTH", "2000"))
 MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "3"))
 RETRY_BASE_DELAY = float(os.getenv("AI_RETRY_BASE_DELAY", "1.0"))
 
+# response_format=json_object solo lo soporta la API oficial de OpenAI.
+# ChatAnywhere y otros proxies lo rechazan con 400.
+_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").lower()
+_SUPPORTS_JSON_MODE = "openai.com" in _base_url
+_JSON_RESPONSE_FORMAT: dict = {"type": "json_object"} if _SUPPORTS_JSON_MODE else {}
+
 PROMPT_INJECTION_PATTERNS = [
     re.compile(r"ignore\s+(all\s+)?(previous\s+)?instructions?", re.I),
     re.compile(r"ignore\s+(the\s+)?system\s+prompt", re.I),
@@ -64,6 +70,19 @@ def _sanitize_untrusted_text(text: str) -> str:
     text = text.replace("<untrusted_text>", "&lt;untrusted_text&gt;")
     text = text.replace("</untrusted_text>", "&lt;/untrusted_text&gt;")
     return text
+
+
+_RE_MARKDOWN_JSON = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
+
+def _strip_markdown_json(text: str) -> str:
+    """Elimina los bloques de código Markdown que algunos modelos añaden
+    cuando no está activo response_format=json_object.
+
+    Ejemplo de entrada:  ```json\n{...}\n```
+    Salida:              {...}
+    """
+    match = _RE_MARKDOWN_JSON.match(text.strip())
+    return match.group(1).strip() if match else text.strip()
 
 def _truncate_text(text: str, max_chars: int, suffix: str = "... [TRUNCADO]") -> str:
     """Trunca un texto a max_chars."""
@@ -195,9 +214,16 @@ class AIService:
     """Servicio de Inteligencia Artificial para PhishingScanner."""
 
     def __init__(self):
-        self.client = get_openai_client()
-        if not self.client:
-            logger.error("Cliente de IA no inicializado.")
+        self._client: Optional[AsyncOpenAI] = None
+
+    @property
+    def client(self) -> Optional[AsyncOpenAI]:
+        """Lazy init: crea el cliente la primera vez que se necesita."""
+        if self._client is None:
+            self._client = get_openai_client()
+            if not self._client:
+                logger.error("Cliente de IA no inicializado.")
+        return self._client
 
     async def generate_analysis_explanation(self, vt_stats: dict, resource_type: str) -> dict:
         """Genera una explicación del análisis de VirusTotal usando IA."""
@@ -258,7 +284,7 @@ class AIService:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    response_format={"type": "json_object"},
+                    **({"response_format": _JSON_RESPONSE_FORMAT} if _JSON_RESPONSE_FORMAT else {}),
                     temperature=AI_TEMPERATURE,
                     max_tokens=AI_MAX_TOKENS_DEFAULT,
                 )
@@ -277,6 +303,9 @@ class AIService:
                     status_code=502,
                     detail="La IA retornó una respuesta vacía."
                 )
+
+            # Eliminar bloques Markdown si el proxy no soporta json_object
+            content = _strip_markdown_json(content)
 
             try:
                 parsed = json.loads(content)

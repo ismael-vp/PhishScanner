@@ -211,7 +211,7 @@ class TechScanner:
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
 
-        if not await is_safe_url(url):
+        if not await _is_safe_url_async(url):
             logger.warning(f"Intento de SSRF bloqueado: {url}")
             return result
 
@@ -247,7 +247,7 @@ class TechScanner:
                             if not location: break
                             from urllib.parse import urljoin
                             next_url = urljoin(current_url, location)
-                            if not await is_safe_url(next_url): break
+                            if not await _is_safe_url_async(next_url): break
                             redirect_chain.append(next_url)
                             current_url = next_url
                             redirect_count += 1

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import tldextract
 
 from models.osint_models import URLStructureResult
+from services.utils import levenshtein_distance, levenshtein_similarity, calculate_risk_level
 
 logger = logging.getLogger(__name__)
 
@@ -80,30 +81,8 @@ TARGET_BRANDS: List[Tuple[str, Set[str], Set[str]]] = [
     ("bbva", {"com", "es"}, set()),
 ]
 
-@functools.lru_cache(maxsize=5000)
-def _levenshtein_distance(s1: str, s2: str) -> int:
-    if len(s1) < len(s2):
-        return _levenshtein_distance(s2, s1)
-    if len(s2) == 0:
-        return len(s1)
-    previous_row = list(range(len(s2) + 1))
-    for i, c1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-    return previous_row[-1]
-
-def _levenshtein_similarity(s1: str, s2: str) -> float:
-    if not s1 and not s2:
-        return 1.0
-    max_len = max(len(s1), len(s2))
-    if max_len == 0:
-        return 1.0
-    return 1.0 - (_levenshtein_distance(s1, s2) / max_len)
+# levenshtein_distance y _levenshtein_similarity se importan desde services.utils
+# (lru_cache compartida, 10 000 slots, sin duplicación de memoria)
 
 def _validate_url(url: str) -> str:
     """Valida y normaliza una URL."""
@@ -158,6 +137,9 @@ def _detect_brand_impersonation(hostname: str, path: str) -> Tuple[List[str], in
     hostname_lower = hostname.lower()
     path_lower = path.lower()
 
+    # tldextract una única vez fuera del bucle (evita 14 llamadas por URL)
+    extracted = tldextract.extract(hostname_lower)
+
     for brand, official_tlds, official_subdomains in TARGET_BRANDS:
         brand_lower = brand.lower()
         in_hostname = brand_lower in hostname_lower
@@ -166,7 +148,6 @@ def _detect_brand_impersonation(hostname: str, path: str) -> Tuple[List[str], in
         if not in_hostname and not in_path:
             continue
 
-        extracted = tldextract.extract(hostname_lower)
         is_official = False
 
         if extracted.domain == brand_lower and extracted.suffix in official_tlds:
@@ -222,7 +203,7 @@ def _detect_suspicious_keywords(subdomain: str, path: str) -> Tuple[List[str], i
                 break
         else:
             for kw, score, label in SUSPICIOUS_KEYWORDS:
-                sim = _levenshtein_similarity(word, kw)
+                sim = levenshtein_similarity(word, kw)
                 if sim >= LEVENSHTEIN_THRESHOLD and word != kw:
                     found.append(f"{label} (typo: {word})")
                     total_score += score
@@ -274,13 +255,6 @@ class URLStructureAnalyzer:
         risk_score += kw_score
 
         risk_score = max(0, min(risk_score, 100))
-        level = self._calculate_level(risk_score)
+        level = calculate_risk_level(risk_score)
 
         return {"risk_score": risk_score, "level": level, "flags": flags}
-
-    @staticmethod
-    def _calculate_level(score: int) -> str:
-        if score >= 70: return "CRITICAL"
-        if score >= 50: return "HIGH"
-        if score >= 25: return "MEDIUM"
-        return "LOW"

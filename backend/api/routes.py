@@ -55,6 +55,10 @@ def check_rate_limit(client_ip: str) -> bool:
     now = time.time()
     window = _rate_limit_store.get(client_ip, [])
     window = [t for t in window if now - t < RATE_LIMIT_WINDOW]
+    if not window:
+        # Limpiar entrada obsoleta para evitar que el dict crezca sin límite
+        _rate_limit_store.pop(client_ip, None)
+        return True
     if len(window) >= RATE_LIMIT_REQUESTS:
         _rate_limit_store[client_ip] = window
         return False
@@ -172,7 +176,8 @@ class ScriptExplainRequest(BaseModel):
 async def analyze_url(request: URLRequest = Body(...)):
     """Analiza una URL en busca de phishing, malware y anomalías."""
     try:
-        cached_result = cache_service.get(request.url, "url")
+        url_cache_key = hashlib.sha256(request.url.encode()).hexdigest()
+        cached_result = cache_service.get(url_cache_key, "url")
         if cached_result:
             return cached_result
 
@@ -217,7 +222,7 @@ async def analyze_url(request: URLRequest = Body(...)):
             "status": "success"
         }
 
-        cache_service.set(request.url, result, "url")
+        cache_service.set(url_cache_key, result, "url")
         return result
 
     except HTTPException:

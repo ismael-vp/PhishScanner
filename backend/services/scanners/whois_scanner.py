@@ -50,11 +50,15 @@ def _validate_hostname(hostname: str) -> str:
     if len(hostname) > MAX_HOSTNAME_LENGTH:
         raise ValueError(f"Hostname demasiado largo: {len(hostname)}")
 
+    # Fix: separar la detección de IP del except genérico para no silenciar
+    # el ValueError de rechazo con el mismo bloque que lo captura.
     try:
         ipaddress.ip_address(hostname)
-        raise ValueError(f"WHOIS no acepta IPs: {hostname}")
+        is_ip = True
     except ValueError:
-        pass
+        is_ip = False
+    if is_ip:
+        raise ValueError(f"WHOIS no acepta IPs: {hostname}")
 
     if not re.match(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)*$", hostname):
         raise ValueError(f"Hostname con formato inválido: {hostname}")

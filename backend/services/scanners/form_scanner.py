@@ -42,6 +42,11 @@ def _get_webhook_patterns() -> list:
 WEBHOOK_PATTERNS = _get_webhook_patterns()
 DANGEROUS_SCHEMES = {"javascript:", "data:", "vbscript:", "file:", "about:"}
 
+# Compiladas a nivel de módulo para no recompilar en cada petición
+_RE_PASSWORD_NAME = re.compile(r"password|passwd|pass|pwd|cc_number|cvv|ssn", re.I)
+_RE_PASSWORD_ID   = re.compile(r"password|passwd|pass|pwd", re.I)
+_RE_SENSITIVE_NAME = re.compile(r"email|user|login|username|account|phone|card", re.I)
+
 def _normalize_netloc(netloc: str) -> str:
     """Normaliza netloc removiendo puerto default."""
     if netloc.endswith(":80"):
@@ -143,6 +148,9 @@ class FormScanner:
                 or url_anatomy.excessive_subdomains
             )
 
+        # ── inicializar fuera del loop: necesarios para el check de iframes ──
+        has_password = False
+        has_sensitive = False
         forms = soup.find_all("form")
         for form in forms:
             action = form.get("action", "") or ""
@@ -163,13 +171,13 @@ class FormScanner:
 
             has_password = bool(
                 form.find("input", type="password")
-                or form.find("input", {"name": re.compile(r"password|passwd|pass|pwd|cc_number|cvv|ssn", re.I)})
-                or form.find("input", {"id": re.compile(r"password|passwd|pass|pwd", re.I)})
+                or form.find("input", {"name": _RE_PASSWORD_NAME})
+                or form.find("input", {"id": _RE_PASSWORD_ID})
             )
 
             has_sensitive = bool(
                 form.find("input", type="email")
-                or form.find("input", {"name": re.compile(r"email|user|login|username|account|phone|card", re.I)})
+                or form.find("input", {"name": _RE_SENSITIVE_NAME})
             )
 
             if has_password or has_sensitive:

@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import ipaddress
 import logging
 import re
 from typing import Optional, List, Set, Tuple
@@ -7,7 +8,7 @@ from typing import Optional, List, Set, Tuple
 import tldextract
 
 from models.osint_models import TyposquattingData
-from services.utils import TARGET_BRANDS
+from services.utils import TARGET_BRANDS, levenshtein_distance, levenshtein_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -57,35 +58,8 @@ SUSPICIOUS_SUFFIXES = {
     "-support", "-help", "-service",
 }
 
-@functools.lru_cache(maxsize=10000)
-def _levenshtein_distance(s1: str, s2: str) -> int:
-    """Calcula la distancia de Levenshtein entre dos strings."""
-    if len(s1) < len(s2):
-        return _levenshtein_distance(s2, s1)
-    if len(s2) == 0:
-        return len(s1)
-
-    previous_row = list(range(len(s2) + 1))
-    for i, c1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-
-    return previous_row[-1]
-
-def _levenshtein_similarity(s1: str, s2: str) -> float:
-    """Retorna similarity 0.0-1.0 basado en distancia de Levenshtein."""
-    if not s1 and not s2:
-        return 1.0
-    max_len = max(len(s1), len(s2))
-    if max_len == 0:
-        return 1.0
-    distance = _levenshtein_distance(s1, s2)
-    return 1.0 - (distance / max_len)
+# levenshtein_distance y levenshtein_similarity importadas desde services.utils
+# (eliminada la copia local que causaba doble caché y trabajo duplicado)
 
 def _detect_homoglyphs(domain: str) -> Tuple[bool, Optional[str], float]:
     """Detecta si el dominio usa caracteres homoglifos."""
@@ -105,7 +79,7 @@ def _detect_homoglyphs(domain: str) -> Tuple[bool, Optional[str], float]:
     for brand in TARGET_BRANDS:
         if normalized_domain == brand:
             return True, brand, 0.95
-        sim = _levenshtein_similarity(normalized_domain, brand)
+        sim = levenshtein_similarity(normalized_domain, brand)
         if sim >= 0.90:
             return True, brand, 0.90
 
@@ -120,7 +94,7 @@ def _detect_levenshtein_typos(domain: str) -> Tuple[bool, Optional[str], float]:
         if domain == brand:
             continue
 
-        sim = _levenshtein_similarity(domain, brand)
+        sim = levenshtein_similarity(domain, brand)
         threshold = 0.85 if len(brand) >= 6 else 0.80
 
         if sim >= threshold and sim > best_confidence:
@@ -198,19 +172,19 @@ def _validate_hostname(hostname: str) -> str:
         raise ValueError("Hostname vacío")
     if len(hostname) > MAX_HOSTNAME_LENGTH:
         raise ValueError(f"Hostname demasiado largo: {len(hostname)}")
-    import ipaddress
+    # Fix: separar la detección de IP del except genérico para no silenciar
+    # la excepción "No se aceptan IPs" con el mismo bloque.
     try:
         ipaddress.ip_address(hostname)
-        raise ValueError("No se aceptan IPs")
+        is_ip = True
     except ValueError:
-        pass
+        is_ip = False
+    if is_ip:
+        raise ValueError(f"No se aceptan IPs en typosquatting: {hostname}")
     return hostname
 
 class TyposquattingScanner:
     """Escáner de typosquatting con múltiples heurísticas."""
-
-    _cache: dict[str, Optional[TyposquattingData]] = {}
-    _cache_max_size = 1000
 
     @staticmethod
     def _extract_root_domain(hostname: str) -> Tuple[str, str]:
@@ -227,10 +201,9 @@ class TyposquattingScanner:
             logger.warning(f"Validación rechazada: {exc}")
             return None
 
-        if hostname in TyposquattingScanner._cache:
-            return TyposquattingScanner._cache[hostname]
-
         try:
+            # _check_typosquatting_sync tiene lru_cache → caché thread-safe
+            # sin race conditions ni memory leak por dict de clase compartido.
             result = await asyncio.to_thread(
                 TyposquattingScanner._check_typosquatting_sync,
                 hostname
@@ -239,17 +212,12 @@ class TyposquattingScanner:
             logger.error(f"Error en TyposquattingScanner: {exc}")
             result = None
 
-        if len(TyposquattingScanner._cache) >= TyposquattingScanner._cache_max_size:
-            keys_to_remove = list(TyposquattingScanner._cache.keys())[:TyposquattingScanner._cache_max_size // 2]
-            for k in keys_to_remove:
-                del TyposquattingScanner._cache[k]
-
-        TyposquattingScanner._cache[hostname] = result
         return result
 
     @staticmethod
+    @functools.lru_cache(maxsize=2000)
     def _check_typosquatting_sync(hostname: str) -> Optional[TyposquattingData]:
-        """Versión síncrona del análisis."""
+        """Versión síncrona del análisis (cacheada via lru_cache, thread-safe)."""
         main_domain, tld = TyposquattingScanner._extract_root_domain(hostname)
 
         if len(main_domain) < MIN_DOMAIN_LENGTH:

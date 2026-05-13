@@ -118,7 +118,7 @@ class GeoScanner:
         try:
             from urllib.parse import quote
             safe_ip = quote(validated_ip, safe="")
-            url = f"http://ip-api.com/json/{safe_ip}"
+            url = f"https://ip-api.com/json/{safe_ip}"
 
             response = await GeoScanner._fetch_with_retry(client, "GET", url)
 
