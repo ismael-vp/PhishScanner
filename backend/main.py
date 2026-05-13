@@ -21,8 +21,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def _validate_critical_env_vars():
-    """Valida variables críticas. En producción aborta; en desarrollo advierte."""
-    critical_vars = {"ADMIN_SECRET_KEY": "Autenticación de administrador"}
+    """Valida variables de entorno críticas al arranque."""
+    critical_vars: dict[str, str] = {}  # añadir aquí vars críticas si se necesitan en el futuro
     is_prod = os.getenv("ENVIRONMENT") == "production"
 
     for var, purpose in critical_vars.items():

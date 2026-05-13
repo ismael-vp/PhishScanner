@@ -1,8 +1,6 @@
 import hashlib
-import hmac
 import json
 import logging
-import os
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -12,7 +10,6 @@ from fastapi import (
     Body,
     Depends,
     File,
-    Header,
     HTTPException,
     Request,
     UploadFile,
@@ -360,32 +357,8 @@ async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):  #
     tags=["Admin"],
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def clear_cache(
-    x_admin_key: str = Header(
-        ...,
-        min_length=1,
-        description="Clave de acceso de administrador"
-    )
-):
+async def clear_cache():
     """Limpia manualmente toda la base de datos de caché."""
-    admin_secret = os.getenv("ADMIN_SECRET_KEY", "").strip()
-
-    if len(admin_secret) < 16:
-        logger.error(
-            "ADMIN_SECRET_KEY no está configurada o no cumple longitud mínima de seguridad (16 chars)."
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Servicio de administración no configurado correctamente."
-        )
-
-    if not hmac.compare_digest(x_admin_key, admin_secret):
-        logger.warning("Intento de acceso denegado a /api/admin/clear-cache.")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acceso denegado: Credenciales no válidas."
-        )
-
     success = cache_service.clear_all()
     if success:
         return {"status": "success", "message": "Caché eliminada correctamente."}
@@ -394,4 +367,3 @@ async def clear_cache(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No se pudo eliminar la caché."
         )
-
