@@ -4,7 +4,6 @@ Tests de integración de la app FastAPI.
 NOTA: El TestClient necesita enviar Host: localhost para superar el
 TrustedHostMiddleware (que en test rechaza 'testserver').
 """
-import pytest
 from fastapi.testclient import TestClient
 
 from main import app
