@@ -140,11 +140,14 @@ class FormScanner:
 
         is_high_risk_domain = False
         if url_anatomy is not None:
-            is_high_risk_domain = bool(
-                url_anatomy.suspicious_tld
-                or url_anatomy.is_dga_suspect
-                or url_anatomy.excessive_hyphens
-                or url_anatomy.excessive_subdomains
+            # Soporta tanto UrlAnatomyData como URLStructureResult (risk_score siempre existe)
+            risk_score = getattr(url_anatomy, "risk_score", 0)
+            is_high_risk_domain = (
+                risk_score >= 50
+                or getattr(url_anatomy, "suspicious_tld", False)
+                or getattr(url_anatomy, "is_dga_suspect", False)
+                or getattr(url_anatomy, "excessive_hyphens", False)
+                or getattr(url_anatomy, "excessive_subdomains", False)
             )
 
         # ── inicializar fuera del loop: necesarios para el check de iframes ──
