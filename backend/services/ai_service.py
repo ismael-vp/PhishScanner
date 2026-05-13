@@ -71,19 +71,6 @@ def _sanitize_untrusted_text(text: str) -> str:
     text = text.replace("</untrusted_text>", "&lt;/untrusted_text&gt;")
     return text
 
-
-_RE_MARKDOWN_JSON = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
-
-def _strip_markdown_json(text: str) -> str:
-    """Elimina los bloques de código Markdown que algunos modelos añaden
-    cuando no está activo response_format=json_object.
-
-    Ejemplo de entrada:  ```json\n{...}\n```
-    Salida:              {...}
-    """
-    match = _RE_MARKDOWN_JSON.match(text.strip())
-    return match.group(1).strip() if match else text.strip()
-
 def _truncate_text(text: str, max_chars: int, suffix: str = "... [TRUNCADO]") -> str:
     """Trunca un texto a max_chars."""
     if len(text) <= max_chars:
@@ -304,9 +291,6 @@ class AIService:
                     detail="La IA retornó una respuesta vacía."
                 )
 
-            # Eliminar bloques Markdown si el proxy no soporta json_object
-            content = _strip_markdown_json(content)
-
             try:
                 parsed = json.loads(content)
                 validated = AnalysisResponse(**parsed)
@@ -437,4 +421,4 @@ class AIService:
             raise HTTPException(
                 status_code=500,
                 detail="Error interno al analizar el script con la IA."
-            )
+            )

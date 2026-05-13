@@ -25,13 +25,6 @@ _base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").lower()
 _SUPPORTS_JSON_MODE = "openai.com" in _base_url
 _JSON_RESPONSE_FORMAT: dict = {"type": "json_object"} if _SUPPORTS_JSON_MODE else {}
 
-_RE_MARKDOWN_JSON = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
-
-def _strip_markdown_json(text: str) -> str:
-    """Elimina bloques ```json ... ``` que algunos proxies añaden a la respuesta."""
-    match = _RE_MARKDOWN_JSON.match(text.strip())
-    return match.group(1).strip() if match else text.strip()
-
 TESSERACT_CONFIG = os.getenv(
     "TESSERACT_CONFIG",
     r"--oem 3 --psm 6 -l spa+eng"
@@ -285,9 +278,6 @@ class ImagePhishingService:
                     detail="La IA retornó una respuesta vacía."
                 )
 
-            # Eliminar bloques Markdown si el proxy no soporta json_object
-            content = _strip_markdown_json(content)
-
             try:
                 parsed = json.loads(content)
                 validated = ImageAnalysisResponse(**parsed)
@@ -319,4 +309,4 @@ class ImagePhishingService:
             raise HTTPException(
                 status_code=500,
                 detail="Error interno al analizar la imagen con la IA."
-            )
+            )
