@@ -30,7 +30,7 @@ beautifulsoup4>=4.12.3
 filetype>=1.2.0
 
 # --- WHOIS ---
-python-whois>=0.9.0
+python-whois>=0.9.6
 
 # --- Extracción de Dominios/TLDs ---
 tldextract>=5.1.1
