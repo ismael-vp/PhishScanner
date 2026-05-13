@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+
 from main import app
 
 client = TestClient(app)
@@ -29,7 +30,7 @@ async def test_global_exception_handler():
     @app.get("/error-test")
     async def error_route():
         raise Exception("Error secreto de base de datos")
-    
+
     response = client.get("/error-test")
     assert response.status_code == 500
     assert "Error interno del servidor" in response.json()["detail"]

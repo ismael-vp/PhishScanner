@@ -3,8 +3,13 @@ Tests de seguridad para PhishingScanner — SSRF, validaciones y heurísticas.
 Ejecutar desde backend/ con: pytest tests/test_security.py -v --no-cov
 """
 import pytest
-from services.utils import is_safe_url, is_safe_url_async, levenshtein_distance, levenshtein_similarity
 
+from services.utils import (
+    is_safe_url,
+    is_safe_url_async,
+    levenshtein_distance,
+    levenshtein_similarity,
+)
 
 # ────────────────────────────────────────────────────────────────────────────
 # is_safe_url — protección SSRF (versión síncrona)

@@ -1,15 +1,12 @@
-import functools
 import logging
 import math
-import os
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 import tldextract
 
-from models.osint_models import URLStructureResult
-from services.utils import levenshtein_distance, levenshtein_similarity, calculate_risk_level
+from services.utils import calculate_risk_level, levenshtein_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +15,7 @@ ENTROPY_THRESHOLD = 0.85
 LEVENSHTEIN_THRESHOLD = 0.80
 MIN_WORD_LENGTH = 4
 
-SUSPICIOUS_KEYWORDS: List[Tuple[str, int, str]] = [
+SUSPICIOUS_KEYWORDS: list[tuple[str, int, str]] = [
     ("login", 15, "Login"),
     ("verify", 15, "Verify"),
     ("secure", 10, "Secure"),
@@ -40,7 +37,7 @@ SUSPICIOUS_KEYWORDS: List[Tuple[str, int, str]] = [
     ("crypto", 10, "Crypto"),
 ]
 
-ABUSED_FREE_HOSTING: List[Tuple[str, int]] = [
+ABUSED_FREE_HOSTING: list[tuple[str, int]] = [
     ("github.io", 25),
     ("gitlab.io", 25),
     ("herokuapp.com", 25),
@@ -63,7 +60,7 @@ ABUSED_FREE_HOSTING: List[Tuple[str, int]] = [
     ("angelfire.com", 20),
 ]
 
-TARGET_BRANDS: List[Tuple[str, Set[str], Set[str]]] = [
+TARGET_BRANDS: list[tuple[str, set[str], set[str]]] = [
     ("google", {"com", "co.uk", "de", "fr", "es", "it", "co.jp", "com.br", "com.mx", "co.in"}, {"googleapis", "googleusercontent", "gstatic", "youtube", "googlevideo"}),
     ("facebook", {"com", "co.uk", "de", "fr", "es"}, {"fbcdn", "instagram", "whatsapp"}),
     ("amazon", {"com", "co.uk", "de", "fr", "es", "it", "co.jp", "com.br", "com.mx", "in", "ca", "com.au"}, {"aws", "cloudfront"}),
@@ -111,7 +108,7 @@ def _calculate_normalized_entropy(text: str) -> float:
     if length <= 1:
         return 0.0
 
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for char in text:
         counts[char] = counts.get(char, 0) + 1
 
@@ -123,16 +120,16 @@ def _calculate_normalized_entropy(text: str) -> float:
     max_entropy = math.log2(length)
     return entropy / max_entropy if max_entropy > 0 else 0.0
 
-def _detect_free_hosting(hostname: str) -> Tuple[bool, List[str], int]:
+def _detect_free_hosting(hostname: str) -> tuple[bool, list[str], int]:
     """Detecta si el hostname usa un hosting gratuito abusado."""
     for domain, score in ABUSED_FREE_HOSTING:
         if hostname == domain or hostname.endswith("." + domain):
             return True, [f"ABUSED_FREE_HOSTING ({domain})"], score
     return False, [], 0
 
-def _detect_brand_impersonation(hostname: str, path: str) -> Tuple[List[str], int]:
+def _detect_brand_impersonation(hostname: str, path: str) -> tuple[list[str], int]:
     """Detecta suplantación de marca en hostname o path."""
-    flags: List[str] = []
+    flags: list[str] = []
     score = 0
     hostname_lower = hostname.lower()
     path_lower = path.lower()
@@ -170,7 +167,7 @@ def _detect_brand_impersonation(hostname: str, path: str) -> Tuple[List[str], in
 
     return flags, score
 
-def _detect_entropy_and_dga(subdomain: str) -> Tuple[List[str], int]:
+def _detect_entropy_and_dga(subdomain: str) -> tuple[list[str], int]:
     """Detecta subdominios con alta entropía (posible DGA)."""
     if not subdomain or len(subdomain) < 5:
         return [], 0
@@ -184,12 +181,12 @@ def _detect_entropy_and_dga(subdomain: str) -> Tuple[List[str], int]:
 
     return [], 0
 
-def _detect_suspicious_keywords(subdomain: str, path: str) -> Tuple[List[str], int]:
+def _detect_suspicious_keywords(subdomain: str, path: str) -> tuple[list[str], int]:
     """Detecta keywords sospechosas y typos de keywords."""
     combined = f"{subdomain} {path}".lower()
     words = re.split(r"[^a-z0-9]", combined)
 
-    found: List[str] = []
+    found: list[str] = []
     total_score = 0
 
     for word in words:
@@ -219,7 +216,7 @@ def _detect_suspicious_keywords(subdomain: str, path: str) -> Tuple[List[str], i
 class URLStructureAnalyzer:
     """Analizador avanzado de estructura de URLs."""
 
-    def analyze(self, url: str) -> Dict[str, Any]:
+    def analyze(self, url: str) -> dict[str, Any]:
         """Analiza una URL y retorna riesgo y flags."""
         try:
             url = _validate_url(url)
@@ -234,7 +231,7 @@ class URLStructureAnalyzer:
         extracted = tldextract.extract(hostname)
         subdomain = extracted.subdomain
 
-        flags: List[str] = []
+        flags: list[str] = []
         risk_score = 0
 
         is_free_hosting, fh_flags, fh_score = _detect_free_hosting(hostname)

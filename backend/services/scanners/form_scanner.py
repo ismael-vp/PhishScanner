@@ -2,8 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from typing import Optional, Set
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -72,7 +71,7 @@ def _is_external_action(action: str, page_hostname: str) -> bool:
 
     return False
 
-def _has_dangerous_scheme(action: str) -> Optional[str]:
+def _has_dangerous_scheme(action: str) -> str | None:
     """Detecta si el action usa un esquema peligroso."""
     if not action:
         return None
@@ -96,7 +95,7 @@ class FormScanner:
     async def analyze_forms(
         html_content: str,
         hostname: str,
-        url_anatomy: Optional[UrlAnatomyData] = None
+        url_anatomy: UrlAnatomyData | None = None
     ) -> FormData:
         """Analiza formularios HTML en busca de indicadores de phishing."""
         result = FormData()
@@ -133,7 +132,7 @@ class FormScanner:
     def _analyze_forms_sync(
         html_content: str,
         hostname: str,
-        url_anatomy: Optional[UrlAnatomyData] = None
+        url_anatomy: UrlAnatomyData | None = None
     ) -> FormData:
         """Versión síncrona del análisis."""
         result = FormData()

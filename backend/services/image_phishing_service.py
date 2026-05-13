@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
@@ -59,7 +58,7 @@ class ImageAnalysisResponse(BaseModel):
     is_phishing: bool
     confidence: str = Field(..., pattern="^(Alta|Media|Baja)$")
     verdict: str = Field(..., min_length=10, max_length=500)
-    red_flags: List[str] = Field(default_factory=list, max_length=10)
+    red_flags: list[str] = Field(default_factory=list, max_length=10)
 
 def _sanitize_ocr_text(text: str) -> str:
     """Sanitiza texto OCR antes de incluirlo en prompts."""
@@ -81,7 +80,7 @@ def _truncate_text(text: str, max_chars: int, suffix: str = "... [TRUNCADO]") ->
         return text
     return text[: max_chars - len(suffix)] + suffix
 
-def _validate_extracted_url(url: str) -> Optional[str]:
+def _validate_extracted_url(url: str) -> str | None:
     """Valida que una URL extraída por OCR sea segura."""
     url = url.strip().strip(".,;:!?\"'()[]")
     if len(url) < 5:
@@ -95,7 +94,7 @@ def _validate_extracted_url(url: str) -> Optional[str]:
         return None
     return url
 
-def _extract_urls_from_text(text: str) -> List[str]:
+def _extract_urls_from_text(text: str) -> list[str]:
     """Extrae URLs válidas de texto OCR."""
     url_pattern = re.compile(
         r"\b(?:https?://|www\.)"
@@ -106,7 +105,7 @@ def _extract_urls_from_text(text: str) -> List[str]:
     )
 
     seen: set[str] = set()
-    urls: List[str] = []
+    urls: list[str] = []
 
     for match in url_pattern.finditer(text):
         raw_url = match.group(0)
@@ -117,7 +116,7 @@ def _extract_urls_from_text(text: str) -> List[str]:
 
     return urls
 
-_tesseract_ready: Optional[bool] = None
+_tesseract_ready: bool | None = None
 
 def _ensure_tesseract():
     """Verifica que pytesseract + Tesseract binary estén disponibles."""
@@ -131,7 +130,7 @@ def _ensure_tesseract():
             pytesseract.pytesseract.tesseract_cmd = default_win_path
         pytesseract.get_tesseract_version()
         _tesseract_ready = True
-    except Exception as exc:
+    except Exception:
         raise HTTPException(
             status_code=500,
             detail=(

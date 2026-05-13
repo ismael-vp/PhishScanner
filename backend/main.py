@@ -9,8 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 load_dotenv()
 
@@ -24,7 +24,7 @@ def _validate_critical_env_vars():
     """Valida variables críticas. En producción aborta; en desarrollo advierte."""
     critical_vars = {"ADMIN_SECRET_KEY": "Autenticación de administrador"}
     is_prod = os.getenv("ENVIRONMENT") == "production"
-    
+
     for var, purpose in critical_vars.items():
         if not os.getenv(var, "").strip():
             msg = f"❌ FALTAN VARIABLES CRÍTICAS: {var} ({purpose})"
@@ -51,8 +51,9 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("🛑 Apagando PhishingScanner API...")
     try:
-        from services.virustotal_service import VirusTotalService
         from services.geo_scanner import GeoScanner
+
+        from services.virustotal_service import VirusTotalService
         await VirusTotalService.close_client()
         await GeoScanner.close_client()
     except Exception as exc:
@@ -109,7 +110,7 @@ async def security_headers_middleware(request: Request, call_next):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     error_id = f"ERR-{os.urandom(4).hex().upper()}"
-    logger.error(f"[{error_id}] ERROR CRÍTICO en {request.url.path}: {type(exc).__name__}: {str(exc)}")
+    logger.error(f"[{error_id}] ERROR CRÍTICO en {request.url.path}: {type(exc).__name__}: {exc!s}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Error interno del servidor.", "error_id": error_id},
@@ -121,13 +122,16 @@ async def health_check(request: Request):
     checks = {}
     try:
         from utils.cache_service import CacheService
-        CacheService(); checks["sqlite"] = "ok"
-    except Exception as exc: checks["sqlite"] = f"error: {type(exc).__name__}"
-    
+        CacheService()
+        checks["sqlite"] = "ok"
+    except Exception as exc:
+        checks["sqlite"] = f"error: {type(exc).__name__}"
+
     try:
         from utils.openai_client import get_openai_client
         checks["ai_client"] = "ok" if get_openai_client() else "not_configured"
-    except Exception as exc: checks["ai_client"] = f"error: {type(exc).__name__}"
+    except Exception as exc:
+        checks["ai_client"] = f"error: {type(exc).__name__}"
 
     all_healthy = all(v == "ok" or v == "not_configured" for v in checks.values())
     return JSONResponse(
@@ -135,5 +139,6 @@ async def health_check(request: Request):
         content={"status": "healthy" if all_healthy else "unhealthy", "checks": checks},
     )
 
-from api.routes import router as analyze_router
+from api.routes import router as analyze_router  # noqa: E402 — import after app init is intentional
+
 app.include_router(analyze_router, prefix="/api")

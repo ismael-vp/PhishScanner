@@ -1,11 +1,9 @@
 import asyncio
 import base64
-import hashlib
 import logging
 import os
 import re
 import time
-from typing import Dict, List, Optional
 
 import httpx
 from fastapi import HTTPException
@@ -29,7 +27,7 @@ VT_RATE_LIMIT_WINDOW = int(os.getenv("VT_RATE_LIMIT_WINDOW", "60"))
 # RATE LIMITING POR TOKEN/IP (memoria local; usar Redis en multi-worker)
 # =============================================================================
 
-_vt_rate_limit_store: Dict[str, List[float]] = {}
+_vt_rate_limit_store: dict[str, list[float]] = {}
 
 
 def _check_vt_rate_limit(identifier: str) -> bool:
@@ -92,7 +90,7 @@ class VirusTotalService:
     y fugas de información.
     """
 
-    _client: Optional[httpx.AsyncClient] = None
+    _client: httpx.AsyncClient | None = None
 
     def __init__(self):
         self.api_key = os.getenv("VT_API_KEY", "").strip()

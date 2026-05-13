@@ -1,16 +1,14 @@
 import asyncio
 import logging
-from typing import Optional
 from urllib.parse import urlparse
 
 from models.osint_models import (
     HeuristicResult,
-    URLStructureResult,
     TyposquattingData,
-    UrlAnatomyData
+    URLStructureResult,
 )
-from services.scanners.url_structure_analyzer import URLStructureAnalyzer
 from services.scanners.typosquatting_scanner import TyposquattingScanner
+from services.scanners.url_structure_analyzer import URLStructureAnalyzer
 from services.utils import calculate_risk_level
 
 logger = logging.getLogger(__name__)
@@ -54,7 +52,7 @@ class HeuristicScanner:
     async def run_full_heuristics(
         self,
         url: str,
-        hostname: Optional[str] = None
+        hostname: str | None = None
     ) -> HeuristicResult:
         """Ejecuta todos los escáneres heurísticos y consolida el riesgo."""
         if not url or not isinstance(url, str):
@@ -87,7 +85,7 @@ class HeuristicScanner:
             return_exceptions=True
         )
 
-        url_anatomy: Optional[URLStructureResult] = None
+        url_anatomy: URLStructureResult | None = None
         base_score = 0
         flags: list[str] = []
 
@@ -99,7 +97,7 @@ class HeuristicScanner:
             base_score = url_anatomy.risk_score
             flags = list(url_anatomy.flags)
 
-        typos_data: Optional[TyposquattingData] = None
+        typos_data: TyposquattingData | None = None
         if isinstance(typos_result, Exception):
             logger.error(f"Error en TyposquattingScanner: {typos_result}")
             flags.append("ERROR: Fallo en typosquatting")
@@ -121,7 +119,7 @@ class HeuristicScanner:
             url_anatomy=url_anatomy
         )
 
-    async def _analyze_url_structure(self, url: str) -> Optional[URLStructureResult]:
+    async def _analyze_url_structure(self, url: str) -> URLStructureResult | None:
         """Ejecuta el URLStructureAnalyzer de forma segura."""
         try:
             if asyncio.iscoroutinefunction(self.url_analyzer.analyze):

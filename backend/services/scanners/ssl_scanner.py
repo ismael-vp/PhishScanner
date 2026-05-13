@@ -1,12 +1,9 @@
 import asyncio
-import ipaddress
 import logging
 import os
-import re
 import socket
 import ssl
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import datetime, timezone
 
 from models.osint_models import SSLData
 from services.utils import is_safe_url
@@ -28,7 +25,7 @@ def _validate_hostname_for_ssl(hostname: str) -> str:
         raise ValueError(f"Hostname bloqueado: {hostname}")
     return hostname
 
-def _parse_ssl_date(date_str: Optional[str]) -> Optional[str]:
+def _parse_ssl_date(date_str: str | None) -> str | None:
     """Convierte una fecha SSL a ISO 8601."""
     if not date_str:
         return None
@@ -52,7 +49,7 @@ def _parse_ssl_date(date_str: Optional[str]) -> Optional[str]:
     logger.warning(f"No se pudo parsear fecha SSL: {date_str}")
     return None
 
-def _analyze_issuer(issuer_name: Optional[str]) -> tuple[Optional[str], bool, bool]:
+def _analyze_issuer(issuer_name: str | None) -> tuple[str | None, bool, bool]:
     """Analiza el nombre del issuer del certificado."""
     if not issuer_name:
         return None, True, True
@@ -69,7 +66,7 @@ def _analyze_issuer(issuer_name: Optional[str]) -> tuple[Optional[str], bool, bo
 
     return issuer_name, is_self_signed, is_suspicious
 
-def _check_expiry(not_after_iso: Optional[str]) -> tuple[bool, bool, Optional[int]]:
+def _check_expiry(not_after_iso: str | None) -> tuple[bool, bool, int | None]:
     """Verifica el estado de expiración del certificado."""
     if not not_after_iso:
         return True, True, None
@@ -94,7 +91,7 @@ class SSLScanner:
     """Escáner de certificados SSL/TLS."""
 
     @staticmethod
-    async def get_ssl_info(hostname: str) -> Optional[SSLData]:
+    async def get_ssl_info(hostname: str) -> SSLData | None:
         """Obtiene información del certificado SSL de un hostname."""
         try:
             safe_hostname = _validate_hostname_for_ssl(hostname)

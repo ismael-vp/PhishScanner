@@ -1,24 +1,31 @@
-import os
-import logging
 import hashlib
 import hmac
-import time
 import json
-from typing import List, Dict, Any
+import logging
+import os
+import time
+from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import (
-    APIRouter, File, UploadFile, HTTPException, Body, Header,
-    Request, status, Depends
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
 )
 from pydantic import BaseModel, Field, field_validator
 
-from services.virustotal_service import VirusTotalService
 from services.ai_service import AIService
-from services.osint_service import OSINTService
 from services.image_phishing_service import ImagePhishingService
-from utils.cache_service import CacheService
+from services.osint_service import OSINTService
 from services.utils import is_safe_url
+from services.virustotal_service import VirusTotalService
+from utils.cache_service import CacheService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,7 +46,7 @@ IMAGE_ALLOWED_TYPES = {
     "image/gif", "image/bmp", "image/tiff"
 }
 
-_rate_limit_store: Dict[str, List[float]] = {}
+_rate_limit_store: dict[str, list[float]] = {}
 
 def get_client_ip(request: Request) -> str:
     """Extrae la IP real del cliente respetando headers de proxy."""
@@ -145,12 +152,12 @@ class ChatMessage(BaseModel):
     content: str = Field(..., min_length=1, max_length=MAX_CHAT_CONTENT_LENGTH)
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage] = Field(..., max_length=MAX_CHAT_MESSAGES)
-    scan_context: Dict[str, Any] = Field(default_factory=dict)
+    messages: list[ChatMessage] = Field(..., max_length=MAX_CHAT_MESSAGES)
+    scan_context: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("scan_context")
     @classmethod
-    def limit_context_size(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+    def limit_context_size(cls, v: dict[str, Any]) -> dict[str, Any]:
         try:
             size = len(json.dumps(v))
         except (TypeError, ValueError):
@@ -173,7 +180,7 @@ class ScriptExplainRequest(BaseModel):
     "/analyze/url",
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def analyze_url(request: URLRequest = Body(...)):
+async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
     """Analiza una URL en busca de phishing, malware y anomalías."""
     try:
         url_cache_key = hashlib.sha256(request.url.encode()).hexdigest()
@@ -238,7 +245,7 @@ async def analyze_url(request: URLRequest = Body(...)):
     "/analyze/image",
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def analyze_image(file: UploadFile = File(...)):
+async def analyze_image(file: UploadFile = File(...)):  # noqa: B008
     """Analiza una imagen en busca de phishing mediante OCR e IA."""
     if not file.filename:
         raise HTTPException(
@@ -298,7 +305,7 @@ async def analyze_image(file: UploadFile = File(...)):
     "/chat",
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def chat_endpoint(request: ChatRequest = Body(...)):
+async def chat_endpoint(request: ChatRequest = Body(...)):  # noqa: B008
     """Endpoint de chat con contexto del escaneo."""
     try:
         clean_context = request.scan_context.copy()
@@ -334,7 +341,7 @@ async def chat_endpoint(request: ChatRequest = Body(...)):
     "/explain-script",
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):
+async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):  # noqa: B008
     """Explica un script remoto."""
     try:
         explanation = await ai_service.explain_script(request.script_url)

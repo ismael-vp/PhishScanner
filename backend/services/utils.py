@@ -1,22 +1,21 @@
 import asyncio
 import functools
+import hashlib
 import ipaddress
 import json
 import logging
 import math
 import os
-import re
 import socket
-import hashlib
 from collections import Counter
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 import filetype
 
 logger = logging.getLogger(__name__)
 
-def _load_list_from_env(env_var: str, default: List[str]) -> List[str]:
+def _load_list_from_env(env_var: str, default: list[str]) -> list[str]:
     """Carga una lista desde variable de entorno (JSON) o usa defaults."""
     env_value = os.getenv(env_var, "").strip()
     if env_value:
@@ -29,27 +28,27 @@ def _load_list_from_env(env_var: str, default: List[str]) -> List[str]:
     return default
 
 TARGET_BRANDS = _load_list_from_env("TARGET_BRANDS", [
-    "google", "microsoft", "amazon", "netflix", "paypal", "apple", "facebook", 
-    "instagram", "linkedin", "binance", "yahoo", "santander", "bbva", "caixabank", 
-    "outlook", "gmail", "twitter", "x", "chase", "wellsfargo", "bankofamerica", 
-    "citibank", "hsbc", "mastercard", "visa", "amex", "discover", "spotify", 
+    "google", "microsoft", "amazon", "netflix", "paypal", "apple", "facebook",
+    "instagram", "linkedin", "binance", "yahoo", "santander", "bbva", "caixabank",
+    "outlook", "gmail", "twitter", "x", "chase", "wellsfargo", "bankofamerica",
+    "citibank", "hsbc", "mastercard", "visa", "amex", "discover", "spotify",
     "tiktok", "snapchat", "telegram", "whatsapp"
 ])
 
 ABUSED_FREE_HOSTING = _load_list_from_env("ABUSED_FREE_HOSTING", [
-    "github.io", "gitlab.io", "vercel.app", "netlify.app", "firebaseapp.com", 
-    "web.app", "pages.dev", "workers.dev", "herokuapp.com", "azurewebsites.net", 
-    "glitch.me", "repl.co", "000webhostapp.com", "blogspot.com", "weebly.com", 
-    "wixsite.com", "wordpress.com", "surge.sh", "neocities.org", "duckdns.org", 
+    "github.io", "gitlab.io", "vercel.app", "netlify.app", "firebaseapp.com",
+    "web.app", "pages.dev", "workers.dev", "herokuapp.com", "azurewebsites.net",
+    "glitch.me", "repl.co", "000webhostapp.com", "blogspot.com", "weebly.com",
+    "wixsite.com", "wordpress.com", "surge.sh", "neocities.org", "duckdns.org",
     "ngrok.io", "serveo.net", "localtunnel.me", "trycloudflare.com", "pagekite.me"
 ])
 
-DANGEROUS_EXTENSIONS: Set[str] = {
-    ".exe", ".dll", ".bat", ".cmd", ".sh", ".bin", ".scr", ".msi", ".com", ".pif", 
-    ".gadget", ".js", ".jse", ".vbs", ".vbe", ".wsf", ".wsh", ".hta", ".ps1", 
-    ".ps1xml", ".ps2", ".ps2xml", ".psc1", ".psc2", ".py", ".pyc", ".pyo", ".pyw", 
-    ".pyz", ".jar", ".class", ".war", ".ear", ".apk", ".dex", ".so", ".elf", 
-    ".docm", ".dotm", ".xlsm", ".xlam", ".pptm", ".potm", ".ppam", ".ppsm", ".sldm", 
+DANGEROUS_EXTENSIONS: set[str] = {
+    ".exe", ".dll", ".bat", ".cmd", ".sh", ".bin", ".scr", ".msi", ".com", ".pif",
+    ".gadget", ".js", ".jse", ".vbs", ".vbe", ".wsf", ".wsh", ".hta", ".ps1",
+    ".ps1xml", ".ps2", ".ps2xml", ".psc1", ".psc2", ".py", ".pyc", ".pyo", ".pyw",
+    ".pyz", ".jar", ".class", ".war", ".ear", ".apk", ".dex", ".so", ".elf",
+    ".docm", ".dotm", ".xlsm", ".xlam", ".pptm", ".potm", ".ppam", ".ppsm", ".sldm",
     ".iso", ".img", ".dmg", ".vmdk", ".zip", ".rar", ".7z", ".tar", ".gz"
 }
 
@@ -94,9 +93,12 @@ def levenshtein_similarity(s1: str, s2: str) -> float:
 
 def calculate_risk_level(score: int) -> str:
     """Convierte score numérico a nivel de riesgo textual."""
-    if score >= 70: return "CRITICAL"
-    if score >= 50: return "HIGH"
-    if score >= 25: return "MEDIUM"
+    if score >= 70:
+        return "CRITICAL"
+    if score >= 50:
+        return "HIGH"
+    if score >= 25:
+        return "MEDIUM"
     return "LOW"
 
 
@@ -122,15 +124,19 @@ def is_safe_url(url: str) -> bool:
     ⚠️  Hace resolución DNS bloqueante. Usar is_safe_url_async() dentro de
     corrutinas para no bloquear el event loop.
     """
-    if not url or not isinstance(url, str): return False
+    if not url or not isinstance(url, str):
+        return False
     url = url.strip()
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"): return False
+        if parsed.scheme not in ("http", "https"):
+            return False
         hostname = parsed.hostname
-        if not hostname: return False
+        if not hostname:
+            return False
         hostname = hostname.lower().strip()
-        if len(hostname) > 253: return False
+        if len(hostname) > 253:
+            return False
 
         # ── Comprobar IP literal ──────────────────────────────────────────
         try:
@@ -160,15 +166,19 @@ async def is_safe_url_async(url: str) -> bool:
     Realiza la resolución DNS usando el event loop de asyncio en lugar de
     socket.getaddrinfo() síncrono.
     """
-    if not url or not isinstance(url, str): return False
+    if not url or not isinstance(url, str):
+        return False
     url = url.strip()
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"): return False
+        if parsed.scheme not in ("http", "https"):
+            return False
         hostname = parsed.hostname
-        if not hostname: return False
+        if not hostname:
+            return False
         hostname = hostname.lower().strip()
-        if len(hostname) > 253: return False
+        if len(hostname) > 253:
+            return False
 
         # ── Comprobar IP literal (no necesita DNS) ────────────────────────
         try:
@@ -193,7 +203,8 @@ async def is_safe_url_async(url: str) -> bool:
 
 def calculate_shannon_entropy(data: bytes) -> float:
     """Calcula la entropía de Shannon."""
-    if not data: return 0.0
+    if not data:
+        return 0.0
     length = len(data)
     occurrences = Counter(data)
     entropy = 0.0
@@ -208,49 +219,58 @@ def calculate_normalized_entropy(data: bytes) -> float:
 
 def format_size(size_bytes: int) -> str:
     """Formatea tamaño en bytes a unidades legibles."""
-    if size_bytes < 0: return "0 B"
+    if size_bytes < 0:
+        return "0 B"
     units = ["B", "KB", "MB", "GB", "TB"]
     size = float(size_bytes)
     idx = 0
     while size >= 1024.0 and idx < len(units) - 1:
-        size /= 1024.0; idx += 1
+        size /= 1024.0
+        idx += 1
     return f"{size:.1f} {units[idx]}"
 
 def _get_file_extension(filename: str) -> str:
-    if not filename or not isinstance(filename, str): return ""
+    if not filename or not isinstance(filename, str):
+        return ""
     return os.path.splitext(os.path.basename(filename).lower())[1]
 
-def _detect_dangerous_extension(filename: str) -> Tuple[bool, Optional[str]]:
+def _detect_dangerous_extension(filename: str) -> tuple[bool, str | None]:
     """Detecta extensiones peligrosas, incluyendo dobles extensiones."""
     ext = _get_file_extension(filename)
-    if ext in DANGEROUS_EXTENSIONS: return True, ext
+    if ext in DANGEROUS_EXTENSIONS:
+        return True, ext
     parts = os.path.basename(filename).lower().split(".")
     if len(parts) >= 3:
         double_ext = "." + parts[-2] + "." + parts[-1]
-        if double_ext in DANGEROUS_EXTENSIONS: return True, double_ext
+        if double_ext in DANGEROUS_EXTENSIONS:
+            return True, double_ext
     return False, None
 
-def calculate_file_forensics(file_bytes: bytes, filename: str) -> Dict[str, Any]:
+def calculate_file_forensics(file_bytes: bytes, filename: str) -> dict[str, Any]:
     """Analiza un archivo y retorna métricas forenses."""
-    if not file_bytes: raise ValueError("Datos de archivo vacíos")
-    
+    if not file_bytes:
+        raise ValueError("Datos de archivo vacíos")
+
     file_size = len(file_bytes)
-    raw_entropy = calculate_shannon_entropy(file_bytes)
     normalized_entropy = calculate_normalized_entropy(file_bytes)
     mime_type = "application/octet-stream"
-    
+
     try:
         kind = filetype.guess(file_bytes)
-        if kind: mime_type = kind.mime
-    except Exception: pass
+        if kind:
+            mime_type = kind.mime
+    except Exception:  # noqa: S110
+        pass
 
     is_dangerous, dangerous_ext = _detect_dangerous_extension(filename)
     entropy_alerts = []
-    if normalized_entropy > 0.95: entropy_alerts.append("ALTA_ENTROPIA: Posible comprimido/cifrado")
-    elif normalized_entropy > 0.90: entropy_alerts.append("ENTROPIA_ELEVADA: Posible ofuscación")
+    if normalized_entropy > 0.95:
+        entropy_alerts.append("ALTA_ENTROPIA: Posible comprimido/cifrado")
+    elif normalized_entropy > 0.90:
+        entropy_alerts.append("ENTROPIA_ELEVADA: Posible ofuscación")
 
     return {
-        "md5": hashlib.md5(file_bytes).hexdigest(),
+        "md5": hashlib.md5(file_bytes).hexdigest(),  # noqa: S324 — usado para fingerprinting, no seguridad
         "sha256": hashlib.sha256(file_bytes).hexdigest(),
         "file_size": format_size(file_size),
         "file_type": mime_type,
