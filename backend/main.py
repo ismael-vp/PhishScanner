@@ -1,125 +1,139 @@
-from fastapi import FastAPI, Request, status, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-from dotenv import load_dotenv
 import logging
 import os
-import traceback
+import sys
+from contextlib import asynccontextmanager
 
-# Configuración de logging para producción
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+load_dotenv()
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Cargar variables de entorno
-load_dotenv()
+def _validate_critical_env_vars():
+    """Valida variables críticas. En producción aborta; en desarrollo advierte."""
+    critical_vars = {"ADMIN_SECRET_KEY": "Autenticación de administrador"}
+    is_prod = os.getenv("ENVIRONMENT") == "production"
+    
+    for var, purpose in critical_vars.items():
+        if not os.getenv(var, "").strip():
+            msg = f"❌ FALTAN VARIABLES CRÍTICAS: {var} ({purpose})"
+            if is_prod:
+                logger.error(msg)
+                sys.exit(1)
+            else:
+                logger.warning(f"{msg}. Continuando en modo desarrollo.")
+
+_validate_critical_env_vars()
+
+limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Gestor del ciclo de vida de la aplicación.
-    """
-    logger.info("🚀 Iniciando motor de PhishingScanner API...")
-    
-    # Verificación de seguridad al arrancar (Fail-Fast pattern)
-    if not os.getenv("VT_API_KEY"):
-        logger.warning("⚠️ ALERTA: VT_API_KEY no encontrada. El motor de VirusTotal fallará.")
-    if not os.getenv("OPENAI_API_KEY"):
-        logger.warning("⚠️ ALERTA: OPENAI_API_KEY no encontrada. La heurística IA fallará.")
-        
-    yield  # El servidor está corriendo
-    
-    logger.info("🛑 Apagando PhishingScanner API de forma segura. Liberando recursos...")
+    logger.info("🚀 Iniciando PhishingScanner API v1.0...")
+    try:
+        from utils.cache_service import CacheService
+        CacheService()
+        logger.info("✅ SQLite caché inicializado")
+    except Exception as exc:
+        logger.error(f"❌ Error inicializando caché: {exc}")
+        sys.exit(1)
+    yield
+    logger.info("🛑 Apagando PhishingScanner API...")
+    try:
+        from services.virustotal_service import VirusTotalService
+        from services.geo_scanner import GeoScanner
+        await VirusTotalService.close_client()
+        await GeoScanner.close_client()
+    except Exception as exc:
+        logger.warning(f"Error cerrando clientes: {exc}")
 
-# Inicializar aplicación FastAPI
 app = FastAPI(
     title="PhishingScanner API",
-    description="Motor de análisis avanzado para Phishing, Typosquatting y Malware",
     version="1.0.0",
-    lifespan=lifespan
+    docs_url="/docs" if os.getenv("ENVIRONMENT") == "development" else None,
+    redoc_url="/redoc" if os.getenv("ENVIRONMENT") == "development" else None,
+    lifespan=lifespan,
 )
 
-# --- HARDENING DE CORS ---
-# Definimos orígenes permitidos (Whitelist)
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Permitir orígenes adicionales por variable de entorno (para producción)
-env_origins = os.getenv("ALLOWED_ORIGINS")
+# --- Middleware & Security ---
+allowed_hosts = ["localhost", "127.0.0.1", "*.onrender.com", "*.vercel.app"]
+env_hosts = os.getenv("ALLOWED_HOSTS", "").strip()
+if env_hosts:
+    allowed_hosts.extend(env_hosts.split(","))
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+env_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
 if env_origins:
-    origins.extend(env_origins.split(","))
+    origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
+
+if "*" in origins:
+    origins.remove("*")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization", "X-Admin-Key", "X-Requested-With"],
+    expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining"],
+    max_age=600,
 )
 
-# --- ESCUDO CONTRA FUGAS DE DATOS (Exception Handlers) ---
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if os.getenv("ENVIRONMENT") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'none'; object-src 'none'; frame-ancestors 'none';"
+    response.headers["X-Powered-By"] = "PhishingScanner"
+    return response
 
-# NUEVO: Interceptor de errores HTTP
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """
-    Intercepta errores HTTP controlados. 
-    Permite mostrar detalles al usuario para errores de cliente (4xx), 
-    pero enmascara los errores de servidor (5xx) para evitar Information Disclosure.
-    """
-    if exc.status_code >= 500:
-        # Logueamos el error real internamente para depuración
-        logger.error(f"⚠️ HTTP ERROR {exc.status_code} en {request.url.path}: {exc.detail}")
-        
-        # Devolvemos un mensaje genérico al frontend
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "detail": "Error interno en los servicios de escaneo. El incidente ha sido registrado.",
-                "status": "error"
-            }
-        )
-    
-    # Para errores 4xx (ej. URL inválida, archivo muy grande), devolvemos el detalle
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "detail": exc.detail,
-            "status": "error"
-        }
-    )
-
-# MANTENIDO: Interceptor de crasheos generales
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """
-    Captura cualquier crasheo imprevisto (no HTTP) para evitar que el servidor 
-    filtre información técnica sensible (rutas locales, versiones, etc.) al cliente.
-    """
-    logger.error(f"⚠️ ERROR CRÍTICO NO CONTROLADO en {request.url.path}: {str(exc)}")
-    logger.error(traceback.format_exc())
-    
+    error_id = f"ERR-{os.urandom(4).hex().upper()}"
+    logger.error(f"[{error_id}] ERROR CRÍTICO en {request.url.path}: {type(exc).__name__}: {str(exc)}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": "Error crítico interno del servidor. El incidente ha sido registrado para revisión técnica.",
-            "status": "error"
-        }
+        content={"detail": "Error interno del servidor.", "error_id": error_id},
     )
 
 @app.get("/health", tags=["Sistema"])
-async def health_check():
-    return {
-        "status": "API operativa", 
-        "engine": "PhishingScanner Core v1.0",
-        "environment": os.getenv("ENVIRONMENT", "development")
-    }
+@limiter.limit("10/minute")
+async def health_check(request: Request):
+    checks = {}
+    try:
+        from utils.cache_service import CacheService
+        CacheService(); checks["sqlite"] = "ok"
+    except Exception as exc: checks["sqlite"] = f"error: {type(exc).__name__}"
+    
+    try:
+        from utils.openai_client import get_openai_client
+        checks["ai_client"] = "ok" if get_openai_client() else "not_configured"
+    except Exception as exc: checks["ai_client"] = f"error: {type(exc).__name__}"
 
-# Registrar router de análisis
+    all_healthy = all(v == "ok" or v == "not_configured" for v in checks.values())
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if all_healthy else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"status": "healthy" if all_healthy else "unhealthy", "checks": checks},
+    )
+
 from api.routes import router as analyze_router
-app.include_router(analyze_router)
+app.include_router(analyze_router, prefix="/api")

@@ -42,3 +42,13 @@ next-env.d.ts
 
 # agents
 .agents
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Databases
+*.db
+*.db-shm
+*.db-wal

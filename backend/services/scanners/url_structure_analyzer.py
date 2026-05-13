@@ -1,141 +1,286 @@
-import re
+import functools
+import logging
 import math
+import os
+import re
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
-from collections import Counter
-import difflib
-from typing import List, Dict, Any, Optional
-from services.utils import TARGET_BRANDS, ABUSED_FREE_HOSTING
+
+import tldextract
+
+from models.osint_models import URLStructureResult
+
+logger = logging.getLogger(__name__)
+
+MAX_URL_LENGTH = 2048
+ENTROPY_THRESHOLD = 0.85
+LEVENSHTEIN_THRESHOLD = 0.80
+MIN_WORD_LENGTH = 4
+
+SUSPICIOUS_KEYWORDS: List[Tuple[str, int, str]] = [
+    ("login", 15, "Login"),
+    ("verify", 15, "Verify"),
+    ("secure", 10, "Secure"),
+    ("account", 10, "Account"),
+    ("update", 10, "Update"),
+    ("auth", 10, "Auth"),
+    ("signin", 15, "Signin"),
+    ("billing", 10, "Billing"),
+    ("confirm", 10, "Confirm"),
+    ("support", 5, "Support"),
+    ("wallet", 10, "Wallet"),
+    ("recovery", 10, "Recovery"),
+    ("clone", 15, "Clone"),
+    ("authenticate", 10, "Authenticate"),
+    ("validation", 10, "Validation"),
+    ("security", 5, "Security"),
+    ("payment", 10, "Payment"),
+    ("bank", 10, "Bank"),
+    ("crypto", 10, "Crypto"),
+]
+
+ABUSED_FREE_HOSTING: List[Tuple[str, int]] = [
+    ("github.io", 25),
+    ("gitlab.io", 25),
+    ("herokuapp.com", 25),
+    ("vercel.app", 25),
+    ("netlify.app", 25),
+    ("firebaseapp.com", 25),
+    ("web.app", 25),
+    ("glitch.me", 25),
+    ("repl.co", 25),
+    ("000webhostapp.com", 30),
+    ("blogspot.com", 20),
+    ("weebly.com", 20),
+    ("wixsite.com", 20),
+    ("wordpress.com", 20),
+    ("pages.dev", 25),
+    ("workers.dev", 25),
+    ("surge.sh", 25),
+    ("neocities.org", 20),
+    ("tripod.com", 20),
+    ("angelfire.com", 20),
+]
+
+TARGET_BRANDS: List[Tuple[str, Set[str], Set[str]]] = [
+    ("google", {"com", "co.uk", "de", "fr", "es", "it", "co.jp", "com.br", "com.mx", "co.in"}, {"googleapis", "googleusercontent", "gstatic", "youtube", "googlevideo"}),
+    ("facebook", {"com", "co.uk", "de", "fr", "es"}, {"fbcdn", "instagram", "whatsapp"}),
+    ("amazon", {"com", "co.uk", "de", "fr", "es", "it", "co.jp", "com.br", "com.mx", "in", "ca", "com.au"}, {"aws", "cloudfront"}),
+    ("apple", {"com", "co.uk"}, {"icloud", "me", "mzstatic"}),
+    ("microsoft", {"com", "co.uk", "de", "fr", "es"}, {"azure", "office", "live", "hotmail", "outlook", "skype", "bing", "msn"}),
+    ("netflix", {"com", "co.uk", "de", "fr", "es", "co.jp"}, set()),
+    ("paypal", {"com", "co.uk", "de", "fr", "es", "it", "co.jp", "com.br", "com.mx"}, set()),
+    ("bankofamerica", {"com"}, set()),
+    ("chase", {"com"}, set()),
+    ("wellsfargo", {"com"}, set()),
+    ("citibank", {"com"}, set()),
+    ("hsbc", {"com", "co.uk"}, set()),
+    ("barclays", {"co.uk"}, set()),
+    ("santander", {"com", "co.uk", "es"}, set()),
+    ("bbva", {"com", "es"}, set()),
+]
+
+@functools.lru_cache(maxsize=5000)
+def _levenshtein_distance(s1: str, s2: str) -> int:
+    if len(s1) < len(s2):
+        return _levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
+def _levenshtein_similarity(s1: str, s2: str) -> float:
+    if not s1 and not s2:
+        return 1.0
+    max_len = max(len(s1), len(s2))
+    if max_len == 0:
+        return 1.0
+    return 1.0 - (_levenshtein_distance(s1, s2) / max_len)
+
+def _validate_url(url: str) -> str:
+    """Valida y normaliza una URL."""
+    if not url or not isinstance(url, str):
+        raise ValueError("URL inválida")
+    url = url.strip()
+    if len(url) > MAX_URL_LENGTH:
+        raise ValueError("URL demasiado larga")
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Esquema no soportado: {parsed.scheme}")
+    if not parsed.hostname:
+        raise ValueError("URL sin hostname")
+
+    return url
+
+def _calculate_normalized_entropy(text: str) -> float:
+    """Calcula la entropía de Shannon normalizada (0.0 - 1.0)."""
+    if not text:
+        return 0.0
+    length = len(text)
+    if length <= 1:
+        return 0.0
+
+    counts: Dict[str, int] = {}
+    for char in text:
+        counts[char] = counts.get(char, 0) + 1
+
+    entropy = 0.0
+    for count in counts.values():
+        p = count / length
+        entropy -= p * math.log2(p)
+
+    max_entropy = math.log2(length)
+    return entropy / max_entropy if max_entropy > 0 else 0.0
+
+def _detect_free_hosting(hostname: str) -> Tuple[bool, List[str], int]:
+    """Detecta si el hostname usa un hosting gratuito abusado."""
+    for domain, score in ABUSED_FREE_HOSTING:
+        if hostname == domain or hostname.endswith("." + domain):
+            return True, [f"ABUSED_FREE_HOSTING ({domain})"], score
+    return False, [], 0
+
+def _detect_brand_impersonation(hostname: str, path: str) -> Tuple[List[str], int]:
+    """Detecta suplantación de marca en hostname o path."""
+    flags: List[str] = []
+    score = 0
+    hostname_lower = hostname.lower()
+    path_lower = path.lower()
+
+    for brand, official_tlds, official_subdomains in TARGET_BRANDS:
+        brand_lower = brand.lower()
+        in_hostname = brand_lower in hostname_lower
+        in_path = brand_lower in path_lower
+
+        if not in_hostname and not in_path:
+            continue
+
+        extracted = tldextract.extract(hostname_lower)
+        is_official = False
+
+        if extracted.domain == brand_lower and extracted.suffix in official_tlds:
+            is_official = True
+        if extracted.subdomain in official_subdomains:
+            is_official = True
+        if extracted.domain in official_subdomains:
+            is_official = True
+
+        if is_official:
+            continue
+
+        if in_hostname:
+            flags.append(f"BRAND_IMPERSONATION_IN_HOSTNAME ({brand})")
+            score += 45
+        elif in_path:
+            flags.append(f"BRAND_IMPERSONATION_IN_PATH ({brand})")
+            score += 35
+        break
+
+    return flags, score
+
+def _detect_entropy_and_dga(subdomain: str) -> Tuple[List[str], int]:
+    """Detecta subdominios con alta entropía (posible DGA)."""
+    if not subdomain or len(subdomain) < 5:
+        return [], 0
+
+    norm_entropy = _calculate_normalized_entropy(subdomain)
+    has_consecutive_numbers = bool(re.search(r"\d{4,}", subdomain))
+
+    if norm_entropy > ENTROPY_THRESHOLD or has_consecutive_numbers:
+        confidence = f"entropy={norm_entropy:.2f}" if norm_entropy > ENTROPY_THRESHOLD else "consecutive_numbers"
+        return [f"HIGH_ENTROPY_SUBDOMAIN ({confidence})"], 15
+
+    return [], 0
+
+def _detect_suspicious_keywords(subdomain: str, path: str) -> Tuple[List[str], int]:
+    """Detecta keywords sospechosas y typos de keywords."""
+    combined = f"{subdomain} {path}".lower()
+    words = re.split(r"[^a-z0-9]", combined)
+
+    found: List[str] = []
+    total_score = 0
+
+    for word in words:
+        if not word or len(word) < MIN_WORD_LENGTH:
+            continue
+
+        for kw, score, label in SUSPICIOUS_KEYWORDS:
+            if word == kw:
+                found.append(label)
+                total_score += score
+                break
+        else:
+            for kw, score, label in SUSPICIOUS_KEYWORDS:
+                sim = _levenshtein_similarity(word, kw)
+                if sim >= LEVENSHTEIN_THRESHOLD and word != kw:
+                    found.append(f"{label} (typo: {word})")
+                    total_score += score
+                    break
+
+    if not found:
+        return [], 0
+
+    unique_found = list(dict.fromkeys(found))
+    flags = [f"SUSPICIOUS_KEYWORD ({kw})" for kw in unique_found]
+    return flags, min(total_score, 50)
 
 class URLStructureAnalyzer:
-    """
-    Analizador avanzado de estructura de URLs diseñado para detectar patrones
-    de phishing, typosquatting, abuso de hosting y suplantación de identidad.
-    """
-    
-    # Listas ahora importadas desde utils.py para centralización
-    ABUSED_FREE_HOSTING = ABUSED_FREE_HOSTING
-    TARGET_BRANDS = TARGET_BRANDS
-
-    
-    SUSPICIOUS_KEYWORDS = [
-        'login', 'verify', 'secure', 'account', 'update', 'auth', 
-        'signin', 'billing', 'confirm', 'support', 'wallet', 'recovery',
-        'clone' # Añadido a la lista principal para mejor detección de distancia
-    ]
-
-    @staticmethod
-    def calculate_entropy(text: str) -> float:
-        if not text:
-            return 0.0
-        length = len(text)
-        counts = Counter(text)
-        entropy = 0.0
-        for count in counts.values():
-            p = count / length
-            entropy -= p * math.log2(p)
-        return entropy
-
-    @staticmethod
-    def _is_levenshtein_similar(word: str, target_list: List[str], threshold: float = 0.8) -> Optional[str]:
-        """Detecta patrones de typosquatting (ej: xlone vs clone, amozon vs amazon)."""
-        if len(word) < 4: return None # Ignorar palabras muy cortas para evitar falsos positivos
-        
-        for target in target_list:
-            ratio = difflib.SequenceMatcher(None, word.lower(), target.lower()).ratio()
-            if ratio >= threshold:
-                return target
-        return None
+    """Analizador avanzado de estructura de URLs."""
 
     def analyze(self, url: str) -> Dict[str, Any]:
-        # SANITIZACIÓN CRÍTICA: Prevenir fallos de urlparse por falta de esquema
-        url = url.strip()
-        if not url.startswith(('http://', 'https://')):
-            url = 'http://' + url
+        """Analiza una URL y retorna riesgo y flags."""
+        try:
+            url = _validate_url(url)
+        except ValueError as exc:
+            logger.warning(f"URL rechazada: {exc}")
+            return {"risk_score": 0, "level": "LOW", "flags": [f"ERROR: {exc}"]}
 
         parsed = urlparse(url)
-        hostname = parsed.netloc.lower()
-        path = parsed.path.lower()
-        
-        flags = []
+        hostname = parsed.hostname.lower() if parsed.hostname else ""
+        path = parsed.path.lower() if parsed.path else ""
+
+        extracted = tldextract.extract(hostname)
+        subdomain = extracted.subdomain
+
+        flags: List[str] = []
         risk_score = 0
-        
-        # 1. Detección de Hosting Gratuito Abusado
-        is_free_hosting = False
-        for domain in self.ABUSED_FREE_HOSTING:
-            if hostname.endswith(domain):
-                flags.append("ABUSED_FREE_HOSTING")
-                risk_score += 25
-                is_free_hosting = True
-                break
-        
-        # 2. Detección de Suplantación de Marca (Brand Impersonation)
-        for brand in self.TARGET_BRANDS:
-            in_hostname = brand in hostname
-            in_path = brand in path
-            
-            # Ajuste de falsos positivos (ej: googleapis pertenece a google)
-            is_official = (
-                hostname == f"{brand}.com" or 
-                hostname.endswith(f".{brand}.com") or
-                (brand == 'google' and 'googleapis.com' in hostname)
-            )
-            
-            if (in_hostname or in_path) and not is_official:
-                location = "HOSTNAME" if in_hostname else "PATH"
-                flags.append(f"BRAND_IMPERSONATION_IN_{location} ({brand.capitalize()})")
-                risk_score += 45
-                break
 
-        # 3. Análisis de Entropía y DGA (Domain Generation Algorithm)
-        parts = hostname.split('.')
-        # Asegurar que hay al menos un subdominio válido
-        if len(parts) > 2 and not is_free_hosting:
-             subdomain = ".".join(parts[:-2])
-        elif is_free_hosting and len(parts) > 2:
-             # Si es github.io (2 partes), el subdominio es la cuenta (ej: ayush68886888)
-             subdomain = parts[0]
-        else:
-             subdomain = ""
+        is_free_hosting, fh_flags, fh_score = _detect_free_hosting(hostname)
+        flags.extend(fh_flags)
+        risk_score += fh_score
 
-        if subdomain:
-            entropy = self.calculate_entropy(subdomain)
-            has_consecutive_numbers = re.search(r'\d{4,}', subdomain) is not None
-            
-            if entropy > 3.8 or has_consecutive_numbers:
-                flags.append("HIGH_ENTROPY_SUBDOMAIN")
-                risk_score += 15
-        
-        # 4. Typosquatting y Palabras Clave de Riesgo (en Path y Subdominio)
-        combined_text = f"{subdomain} {path}"
-        words = re.split(r'[^a-zA-Z0-9]', combined_text)
-        
-        found_keywords = set()
-        for word in words:
-            if not word: continue
-            
-            if word in self.SUSPICIOUS_KEYWORDS:
-                found_keywords.add(word)
-            else:
-                similar = self._is_levenshtein_similar(word, self.SUSPICIOUS_KEYWORDS, 0.75)
-                if similar and word != similar:
-                    found_keywords.add(f"{word} (similar a {similar})")
-        
-        if found_keywords:
-            for kw in found_keywords:
-                flags.append(f"SUSPICIOUS_KEYWORD ({kw})")
-            risk_score += 15 * len(found_keywords)
+        bi_flags, bi_score = _detect_brand_impersonation(hostname, path)
+        flags.extend(bi_flags)
+        risk_score += bi_score
 
-        # 5. Evaluación Final y Normalización
-        risk_score = min(risk_score, 100)
-        
-        level = "LOW"
-        if risk_score >= 70:
-            level = "CRITICAL"
-        elif risk_score >= 40:
-            level = "MEDIUM"
-            
-        return {
-            "risk_score": risk_score,
-            "level": level,
-            "flags": flags
-        }
+        entropy_target = subdomain if not is_free_hosting else extracted.domain
+        ent_flags, ent_score = _detect_entropy_and_dga(entropy_target)
+        flags.extend(ent_flags)
+        risk_score += ent_score
+
+        kw_flags, kw_score = _detect_suspicious_keywords(subdomain, path)
+        flags.extend(kw_flags)
+        risk_score += kw_score
+
+        risk_score = max(0, min(risk_score, 100))
+        level = self._calculate_level(risk_score)
+
+        return {"risk_score": risk_score, "level": level, "flags": flags}
+
+    @staticmethod
+    def _calculate_level(score: int) -> str:
+        if score >= 70: return "CRITICAL"
+        if score >= 50: return "HIGH"
+        if score >= 25: return "MEDIUM"
+        return "LOW"

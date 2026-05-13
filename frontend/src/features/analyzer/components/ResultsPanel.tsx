@@ -32,7 +32,9 @@ function ResultsPanelInner() {
     return (
       <div className="w-full max-w-2xl mx-auto mt-6 bg-black border border-red-900/50 p-4 rounded-lg flex items-start space-x-3">
         <AlertTriangle className="text-red-600 mt-0.5 flex-shrink-0" size={18} />
-        <div className="text-sm text-red-500">{error}</div>
+        <div className="text-sm text-red-500">
+          {typeof error === 'string' ? error : JSON.stringify(error)}
+        </div>
       </div>
     );
   }

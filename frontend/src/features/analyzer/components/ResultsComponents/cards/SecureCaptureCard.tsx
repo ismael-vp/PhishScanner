@@ -34,7 +34,7 @@ export default function SecureCaptureCard({ osintData, safeUrl }: SecureCaptureC
     if (currentImageUrl) {
       const timer = setTimeout(() => {
         setIsLoading(false);
-      }, 10000);
+      }, 20000);
       return () => clearTimeout(timer);
     }
   }, [currentImageUrl]);

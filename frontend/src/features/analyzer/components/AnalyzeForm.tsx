@@ -7,7 +7,7 @@ import { Link, Search, X, Trash2, ScanLine } from 'lucide-react';
 import { API_URL } from '@/lib/api';
 
 export default function AnalyzeForm() {
-  const { mode, setMode, setIsScanning, setScanResult, setError, isScanning } = useThreatStore();
+  const { mode, setMode, setIsScanning, setScanResult, setError, isScanning, error } = useThreatStore();
   const [urlInput, setUrlInput] = useState('');
   const [imageInput, setImageInput] = useState<File | null>(null);
   const [loadingMessage, setLoadingMessage] = useState('Iniciando análisis...');
@@ -108,7 +108,14 @@ export default function AnalyzeForm() {
       }
 
       if (axios.isAxiosError(err) && err.response && err.response.data && err.response.data.detail) {
-        setError(err.response.data.detail);
+        const detail = err.response.data.detail;
+        if (Array.isArray(detail)) {
+          // Si es un error de validación de Pydantic, extraemos el mensaje del primer error
+          const firstError = detail[0];
+          setError(firstError.msg || "Error de validación en los datos enviados.");
+        } else {
+          setError(String(detail));
+        }
       } else {
         setError("Error de conexión con el servidor. ¿Está el backend encendido?");
       }

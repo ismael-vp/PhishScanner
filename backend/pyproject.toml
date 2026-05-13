@@ -1,5 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phishingscanner"
+version = "1.0.0"
+description = "Motor de análisis avanzado para Phishing, Typosquatting y Malware"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "httpx>=0.25.0",
+    "python-multipart>=0.0.6",
+    "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
+    "openai>=1.3.0",
+    "slowapi>=0.1.9",
+    "pillow>=10.1.0",
+    "pytesseract>=0.3.10",
+    "beautifulsoup4>=4.12.0",
+    "tldextract>=5.1.0",
+    "filetype>=1.2.0",
+    "whois>=0.9.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.6",
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.7.0",
+    "bandit[toml]>=1.7.5",
+    "safety>=2.3.0",
+]
+
+# =============================================================================
+# RUFF - Linter y formateador (reemplaza Black, Flake8, isort, pydocstyle)
+# =============================================================================
+
 [tool.ruff]
-# Exclude a variety of commonly ignored directories.
+# Python target
+target-version = "py311"
+
+# Longitud de línea (88 es el estándar de Black)
+line-length = 88
+indent-width = 4
+
+# Directorios excluidos
 exclude = [
     ".bzr",
     ".direnv",
@@ -27,42 +75,173 @@ exclude = [
     "node_modules",
     "site-packages",
     "venv",
+    "migrations",  # Archivos de migración de DB
 ]
 
-# Same as Black.
-line-length = 88
-indent-width = 4
-
-# Assume Python 3.12
-target-version = "py312"
-
 [tool.ruff.lint]
-# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
-# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
-# syntax error annotations (`B`) by default.
-select = ["E4", "E7", "E9", "F"]
-ignore = []
+# =============================================================================
+# REGLAS HABILITADAS
+# =============================================================================
+# E - pycodestyle errors (estilo PEP8)
+# W - pycodestyle warnings
+# F - Pyflakes (errores lógicos, imports no usados)
+# I - isort (ordenación de imports)
+# N - pep8-naming (nombres de variables/funciones)
+# D - pydocstyle (docstrings)
+# S - bandit (SEGURIDAD - CRÍTICO)
+# C - mccabe (complejidad ciclomática)
+# B - flake8-bugbear (bugs comunes)
+# UP - pyupgrade (sintaxis moderna)
+# ANN - flake8-annotations (type hints)
+# T20 - flake8-print (prohibir print)
+# ERA - eradicate (código comentado)
+# FIX - flake8-fixme (TODO/FIXME)
+# =============================================================================
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "D",    # pydocstyle
+    "S",    # bandit (SEGURIDAD)
+    "C90",  # mccabe (complejidad)
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "ANN",  # type hints
+    "T20",  # no print statements
+    "ERA",  # no commented code
+    "FIX",  # no FIXME/TODO
+]
 
-# Allow fix for all enabled rules (when `--fix`) is provided.
+# Reglas específicas a ignorar (con justificación)
+ignore = [
+    # D100: Missing docstring in public module
+    # Justificación: Los __init__.py suelen no necesitar docstring
+    "D100",
+
+    # D104: Missing docstring in public package
+    # Justificación: Igual que D100
+    "D104",
+
+    # ANN101: Missing type annotation for self in method
+    # Justificación: self es implícito en Python
+    "ANN101",
+
+    # ANN102: Missing type annotation for cls in classmethod
+    # Justificación: cls es implícito en Python
+    "ANN102",
+
+    # S311: Standard pseudo-random generators are not suitable for security/cryptographic purposes
+    # Justificación: Usamos secrets/os.urandom para criptografía, random para non-security
+    "S311",
+]
+
+# Permitir autofix para todas las reglas habilitadas
 fixable = ["ALL"]
 unfixable = []
 
-# Allow unused variables when underscore-prefixed.
+# Variables dummy (prefijadas con _)
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
+# Complejidad ciclomática máxima (default 10, bajamos a 15 para ser pragmáticos)
+mccabe = { max-complexity = 15 }
+
+[tool.ruff.lint.per-file-ignores]
+# =============================================================================
+# EXCEPCIONES POR ARCHIVO
+# =============================================================================
+# Tests: permitir asserts (S101), prints para debugging (T20), docstrings opcionales
+"tests/**/*.py" = ["S101", "T20", "D"]
+
+# Scripts de utilidad: permitir prints
+"scripts/**/*.py" = ["T20"]
+
+# Modelos Pydantic: pueden tener nombres en CamelCase
+"**/models/*.py" = ["N"]
+
+[tool.ruff.lint.pydocstyle]
+# Estilo de docstrings: Google
+convention = "google"
+
 [tool.ruff.format]
-# Like Black, use double quotes for strings.
+# Estilo de formato
 quote-style = "double"
-
-# Like Black, indent with spaces, rather than tabs.
 indent-style = "space"
-
-# Like Black, respect magic trailing commas.
 skip-magic-trailing-comma = false
-
-# Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
+
+# =============================================================================
+# MYPY - Type checking estático
+# =============================================================================
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+# =============================================================================
+# PYTEST - Testing
+# =============================================================================
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--verbose",
+    "--cov=services",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=80",
+]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m "not slow"')",
+    "integration: marks tests as integration tests",
+    "security: marks tests as security-focused tests",
+]
+
+# =============================================================================
+# BANDIT - Análisis de seguridad estático (backup por si Ruff S no cubre todo)
+# =============================================================================
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts", ".venv", "venv"]
+skips = ["B101"]  # Permitir asserts en tests (ya manejado por per-file-ignores)
+
+# =============================================================================
+# COVERAGE - Cobertura de tests
+# =============================================================================
+
+[tool.coverage.run]
+source = ["services", "api", "utils"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/venv/*",
+    "*/.venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

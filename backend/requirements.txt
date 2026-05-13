@@ -1,17 +1,39 @@
-fastapi
-uvicorn
-gunicorn
-python-dotenv
-httpx
-openai
-python-multipart
-python-whois==0.9.6
-beautifulsoup4
-filetype
-pytesseract
-Pillow
-PyYAML
-ruff
-pytest
-httpx
-pytest-asyncio
+# --- Framework Web ---
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# --- Validación de Datos ---
+pydantic>=2.5.3
+email-validator>=2.1.0
+
+# --- Cliente HTTP ---
+httpx>=0.26.0
+
+# --- Inteligencia Artificial (OpenAI / ChatAnywhere compatible) ---
+openai>=1.10.0
+
+# --- Seguridad y Rate Limiting ---
+slowapi>=0.1.9
+
+# --- Utilidades ---
+python-dotenv>=1.0.0
+
+# --- OCR y Procesamiento de Imágenes ---
+pytesseract>=0.3.10
+Pillow>=10.2.0
+
+# --- Parsing HTML ---
+beautifulsoup4>=4.12.3
+
+# --- Detección de Tipos de Archivo ---
+filetype>=1.2.0
+
+# --- WHOIS ---
+python-whois>=0.9.27
+
+# --- Extracción de Dominios/TLDs ---
+tldextract>=5.1.1
+
+# --- YAML (versión segura) ---
+PyYAML>=6.0.1

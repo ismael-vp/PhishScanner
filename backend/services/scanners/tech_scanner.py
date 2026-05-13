@@ -1,224 +1,282 @@
-import httpx
-import re
-import logging
-import socket
-import ipaddress
 import asyncio
-from bs4 import BeautifulSoup
+import ipaddress
+import logging
+import os
+import re
+import socket
+from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
+
+import httpx
+from bs4 import BeautifulSoup
+
 from models.osint_models import TechData, PrivacyData
+from services.utils import is_safe_url
 
 logger = logging.getLogger(__name__)
 
-# --- NUEVO: Función de seguridad para evitar SSRF ---
-def is_safe_url(url: str) -> bool:
-    """
-    Verifica que la URL apunte a una IP pública y no a redes internas, 
-    localhost o IPs reservadas.
-    """
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ('http', 'https'): 
-            return False
-        
-        # Extraemos el hostname (eliminando el puerto si lo hubiera)
-        hostname = parsed.netloc.split(':')[0]
-        
-        # Resolvemos el dominio a IP
-        ip = socket.gethostbyname(hostname)
-        ip_obj = ipaddress.ip_address(ip)
-        
-        # Bloquear IPs privadas, de loopback y reservadas
-        return not (ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved)
-    except Exception as e:
-        logger.warning(f"Error resolviendo DNS para {url}: {e}")
-        return False
+MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024
+MAX_HTML_FOR_MODEL = 200_000
+HTTP_TIMEOUT = 10.0
+USER_AGENT = os.getenv(
+    "TECH_SCANNER_USER_AGENT",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+)
 
+TRACKER_PATTERNS: List[Tuple[str, List[str]]] = [
+    ("doubleclick.net", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("google-analytics.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("googletagmanager.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("facebook.net", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("facebook.com/tr/", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("adnxs.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("adsnative.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("hotjar.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("scorecardresearch.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("bing.com/pixel", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("taboola.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("outbrain.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("rubiconproject.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("pubmatic.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("criteo.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("tiktok.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("ads-twitter.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("snap.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("pinterest.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("amazon-adsystem.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("redditstatic.com/ads", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("yandex.ru/metrika", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("clarity.ms", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("mouseflow.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("segment.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+    ("mixpanel.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
+]
+
+STORAGE_PATTERNS: List[Tuple[str, str]] = [
+    ("localstorage", "Almacenamiento Local (LocalStorage)"),
+    ("window.localstorage", "Almacenamiento Local (LocalStorage)"),
+    ("sessionstorage", "Almacenamiento de Sesión (SessionStorage)"),
+    ("window.sessionstorage", "Almacenamiento de Sesión (SessionStorage)"),
+    ("indexeddb", "Base de Datos Local (IndexedDB)"),
+    ("window.indexeddb", "Base de Datos Local (IndexedDB)"),
+]
+
+DATA_LINKED_REGEX: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r'''type=["']email["']''', re.I), "Correo Electrónico"),
+    (re.compile(r'''name=["']email["']''', re.I), "Correo Electrónico"),
+    (re.compile(r'''type=["']tel["']''', re.I), "Número de Teléfono"),
+    (re.compile(r'''name=["'](phone|tel)["']''', re.I), "Número de Teléfono"),
+]
+
+DATA_LINKED_SIMPLE: List[Tuple[str, str]] = [
+    ("accounts.google.com/gsi/client", "Perfil de Google"),
+    ("gapi.auth2", "Perfil de Google"),
+    ("connect.facebook.net", "Perfil de Facebook"),
+    ("appleid.apple.com/appleauth", "Perfil de Apple"),
+    ("js.stripe.com", "Datos Financieros (Stripe)"),
+    ("elements", "Datos Financieros (Stripe)"),
+    ("paypalobjects.com", "Datos Financieros (PayPal)"),
+    ("paypal.com/sdk", "Datos Financieros (PayPal)"),
+]
+
+DEVICE_ACCESS_PATTERNS: List[Tuple[str, str]] = [
+    ("getusermedia", "Cámara y Micrófono"),
+    ("enumeratedevices", "Cámara y Micrófono"),
+    ("requestpermission", "Notificaciones Push"),
+    ("navigator.clipboard.readtext", "Portapapeles (Copiar/Pegar)"),
+    ("navigator.clipboard.read", "Portapapeles (Copiar/Pegar)"),
+    ("navigator.getbattery", "Estado de la Batería"),
+    ("navigator.bluetooth", "Bluetooth"),
+    ("navigator.usb", "Puertos USB"),
+]
+
+FINGERPRINTING_PATTERNS: List[Tuple[str, str]] = [
+    ("todataurl", "Huella Digital (Canvas Fingerprinting)"),
+    ("audiocontext", "Huella Digital (Audio Fingerprinting)"),
+    ("oscillator", "Huella Digital (Audio Fingerprinting)"),
+    ("webgl", "Huella Digital Gráfica (WebGL)"),
+    ("rtcpeerconnection", "Fugas de Red (WebRTC)"),
+    ("mozrtcpeerconnection", "Fugas de Red (WebRTC)"),
+]
+
+async def _is_safe_url_async(url: str) -> bool:
+    """Wrapper async que ejecuta la validación en thread."""
+    return await asyncio.to_thread(is_safe_url, url)
+
+def _is_safe_redirect(url: str) -> bool:
+    """Valida que una URL de redirección sea segura."""
+    return is_safe_url(url)
+
+def _analyze_privacy(html_lower: str, external_scripts: List[str]) -> PrivacyData:
+    """Analiza el HTML en busca de indicadores de privacidad."""
+    privacy = PrivacyData()
+    tracking_used: Set[str] = set()
+    data_linked: Set[str] = set()
+    device_access: Set[str] = set()
+    trackers_count = 0
+
+    for script_url in external_scripts:
+        script_lower = script_url.lower()
+        for pattern, labels in TRACKER_PATTERNS:
+            if pattern in script_lower:
+                trackers_count += 1
+                tracking_used.update(labels)
+                break
+
+    if trackers_count > 0:
+        tracking_used.add("Análisis de Comportamiento")
+
+    for pattern, label in STORAGE_PATTERNS:
+        if pattern in html_lower:
+            tracking_used.add(label)
+
+    for compiled_re, label in DATA_LINKED_REGEX:
+        if compiled_re.search(html_lower):
+            data_linked.add(label)
+
+    for pattern, label in DATA_LINKED_SIMPLE:
+        if pattern in html_lower:
+            if "facebook" in label.lower() and "xfbml" not in html_lower:
+                continue
+            data_linked.add(label)
+
+    for pattern, label in DEVICE_ACCESS_PATTERNS:
+        if pattern in html_lower:
+            if label == "Notificaciones Push" and "notification" not in html_lower:
+                continue
+            device_access.add(label)
+
+    for pattern, label in FINGERPRINTING_PATTERNS:
+        if pattern in html_lower:
+            if "Canvas" in label and "canvas" not in html_lower:
+                continue
+            if "WebGL" in label and not any(kw in html_lower for kw in ("getextension", "debug_renderer_info")):
+                continue
+            tracking_used.add(label)
+
+    if "geolocation" in html_lower or "navigator.geolocation" in html_lower:
+        data_linked.add("Ubicación Geográfica")
+
+    privacy.tracking_used = sorted(list(tracking_used))
+    privacy.trackers_count = trackers_count
+    privacy.data_linked = sorted(list(data_linked))
+    privacy.device_access = sorted(list(device_access))
+
+    return privacy
+
+def _extract_external_scripts(html_content: str, hostname: str) -> List[str]:
+    """Extrae scripts externos del HTML."""
+    soup = BeautifulSoup(html_content, "html.parser")
+    scripts = soup.find_all("script", src=True)
+
+    external_scripts: Set[str] = set()
+    hostname_lower = hostname.lower()
+
+    for script in scripts:
+        src = script["src"]
+        parsed_src = urlparse(src)
+
+        if parsed_src.netloc and parsed_src.netloc.lower() != hostname_lower:
+            external_scripts.add(src)
+        elif src.startswith("//"):
+            parsed_relative = urlparse("http:" + src)
+            if parsed_relative.netloc and parsed_relative.netloc.lower() != hostname_lower:
+                external_scripts.add("https:" + src)
+
+    return sorted(list(external_scripts))
 
 class TechScanner:
+    """Escáner técnico de páginas web."""
 
     @staticmethod
-    def _cpu_bound_analysis(html_content: str, response_headers: dict, cookies_dict: dict, hostname: str):
-        """
-        Esta función contiene todo el código que estresa la CPU.
-        Al separarlo aquí, podemos enviarlo a un hilo secundario y evitar que FastAPI se congele.
-        """
-        # --- NUEVO: Solución al error de variable no definida ---
+    def _cpu_bound_analysis(
+        html_content: str,
+        response_headers: Dict[str, str],
+        cookies_dict: Dict[str, str],
+        hostname: str
+    ) -> Tuple[List[str], List[str], PrivacyData]:
+        """Análisis CPU-intensivo ejecutado en thread."""
         html_lower = html_content.lower()
-        
-        # --- 1. Parsing del DOM ---
-        soup = BeautifulSoup(html_content, "html.parser")
-        scripts = soup.find_all("script", src=True)
-
-        external_scripts = []
-        for script in scripts:
-            src = script["src"]
-            parsed_src = urlparse(src)
-
-            if parsed_src.netloc and parsed_src.netloc != hostname:
-                external_scripts.append(src)
-            elif src.startswith("//"):
-                parsed_protocol_relative = urlparse("http:" + src)
-                if parsed_protocol_relative.netloc and parsed_protocol_relative.netloc != hostname:
-                    external_scripts.append("https:" + src)
-
-        external_scripts = list(set(external_scripts))
-
-        # --- 2. Detección de Tecnologías (ELIMINADO) ---
-        technologies = []
-
-        # --- 3. Privacy Nutrition Label (Detección de Rastreadores) ---
-        privacy = PrivacyData()
-        tracking_used = set()
-        data_linked = set()
-        device_access = set()
-        trackers_count = 0
-
-        tracker_domains = [
-            "doubleclick.net", "google-analytics.com", "googletagmanager.com",
-            "facebook.net", "facebook.com/tr/", "adnxs.com", "adsnative.com",
-            "hotjar.com", "scorecardresearch.com", "bing.com/pixel", "taboola.com",
-            "outbrain.com", "rubiconproject.com", "pubmatic.com", "criteo.com",
-            "tiktok.com", "ads-twitter.com", "snap.com", "pinterest.com",
-            "amazon-adsystem.com", "redditstatic.com/ads", "yandex.ru/metrika",
-            "clarity.ms", "mouseflow.com", "segment.com", "mixpanel.com"
-        ]
-
-        for script_url in external_scripts:
-            if any(domain in script_url.lower() for domain in tracker_domains):
-                trackers_count += 1
-                tracking_used.add("Cookies de Terceros")
-                tracking_used.add("Rastreo Publicitario")
-
-        if trackers_count > 0:
-            tracking_used.add("Análisis de Comportamiento")
-
-        if "localstorage" in html_lower or "window.localstorage" in html_lower:
-            tracking_used.add("Almacenamiento Local (LocalStorage)")
-        if "sessionstorage" in html_lower or "window.sessionstorage" in html_lower:
-            tracking_used.add("Almacenamiento de Sesión (SessionStorage)")
-        if "indexeddb" in html_lower or "window.indexeddb" in html_lower:
-            tracking_used.add("Base de Datos Local (IndexedDB)")
-
-        if re.search(r'type=["\']email["\']', html_lower) or re.search(r'name=["\']email["\']', html_lower):
-            data_linked.add("Correo Electrónico")
-        if re.search(r'type=["\']tel["\']', html_lower) or re.search(r'name=["\'](phone|tel)["\']', html_lower):
-            data_linked.add("Número de Teléfono")
-        if "geolocation" in html_lower or "navigator.geolocation" in html_lower:
-            data_linked.add("Ubicación Geográfica")
-
-        if "accounts.google.com/gsi/client" in html_lower or "gapi.auth2" in html_lower:
-            data_linked.add("Perfil de Google")
-        if "connect.facebook.net" in html_lower and "xfbml" in html_lower:
-            data_linked.add("Perfil de Facebook")
-        if "appleid.apple.com/appleauth" in html_lower:
-            data_linked.add("Perfil de Apple")
-
-        if "js.stripe.com" in html_lower or "elements" in html_lower:
-            data_linked.add("Datos Financieros (Stripe)")
-        if "paypalobjects.com" in html_lower or "paypal.com/sdk" in html_lower:
-            data_linked.add("Datos Financieros (PayPal)")
-
-        if "getusermedia" in html_lower or "enumeratedevices" in html_lower:
-            device_access.add("Cámara y Micrófono")
-        if "requestpermission" in html_lower and "notification" in html_lower:
-            device_access.add("Notificaciones Push")
-        if "navigator.clipboard.readtext" in html_lower or "navigator.clipboard.read" in html_lower:
-            device_access.add("Portapapeles (Copiar/Pegar)")
-        if "navigator.getbattery" in html_lower:
-            device_access.add("Estado de la Batería")
-        if "navigator.bluetooth" in html_lower:
-            device_access.add("Bluetooth")
-        if "navigator.usb" in html_lower:
-            device_access.add("Puertos USB")
-
-        if "todataurl" in html_lower and "canvas" in html_lower:
-            tracking_used.add("Huella Digital (Canvas Fingerprinting)")
-        if "audiocontext" in html_lower or "oscillator" in html_lower:
-            tracking_used.add("Huella Digital (Audio Fingerprinting)")
-        if "webgl" in html_lower and ("getextension" in html_lower or "debug_renderer_info" in html_lower):
-            tracking_used.add("Huella Digital Gráfica (WebGL)")
-        if "rtcpeerconnection" in html_lower or "mozrtcpeerconnection" in html_lower:
-            tracking_used.add("Fugas de Red (WebRTC)")
-
-        privacy.tracking_used = sorted(list(tracking_used))
-        privacy.trackers_count = trackers_count
-        privacy.data_linked = sorted(list(data_linked))
-        privacy.device_access = sorted(list(device_access))
+        external_scripts = _extract_external_scripts(html_content, hostname)
+        technologies: List[str] = []
+        privacy = _analyze_privacy(html_lower, external_scripts)
 
         return external_scripts, technologies, privacy
 
-
     @staticmethod
     async def get_tech_and_scripts(url: str, hostname: str) -> TechData:
+        """Obtiene datos técnicos de una URL."""
         result = TechData()
 
-        html_content = ""
-        response_headers: dict = {}
-        cookies_dict: dict = {}
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
 
-        try:
-            if not url.startswith(("http://", "https://")):
-                url = "https://" + url
-
-            # --- NUEVO: Verificación SSRF ---
-            if not is_safe_url(url):
-                logger.warning(f"Intento de SSRF bloqueado. URL no segura: {url}")
-                return result # Devolvemos el objeto vacío en lugar de escanear
-            
-            req_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            
-            # --- NUEVO: verify=True (Seguridad SSL) y protección contra DoS limitando la descarga ---
-            async with httpx.AsyncClient(verify=True) as client:
-                # Usamos stream para no cargar payloads gigantes en memoria
-                async with client.stream("GET", url, follow_redirects=True, timeout=10.0, headers=req_headers) as response:
-                    
-                    # Chequeo rápido de headers si el servidor declara el tamaño
-                    content_length = response.headers.get("Content-Length")
-                    if content_length and int(content_length) > 2 * 1024 * 1024:
-                        logger.warning(f"Payload demasiado grande reportado por el servidor: {url}")
-                        return result
-                    
-                    chunks = []
-                    bytes_read = 0
-                    
-                    # Leemos los chunks poco a poco
-                    async for chunk in response.aiter_bytes():
-                        bytes_read += len(chunk)
-                        if bytes_read > 2 * 1024 * 1024: # Límite estricto de 2MB
-                            logger.warning(f"Se excedió el límite de 2MB leyendo: {url}")
-                            break
-                        chunks.append(chunk)
-                        
-                    html_content = b"".join(chunks).decode("utf-8", errors="ignore")
-                    
-                    result.html_content = html_content 
-                    response_headers = dict(response.headers)
-                    cookies_dict = dict(response.cookies)
-
-                    redirect_chain = [str(req.url) for req in response.history]
-                    redirect_chain.append(str(response.url))
-                    result.redirect_chain = redirect_chain
-
-        except Exception as e:
-            logger.warning(f"Error al conectar por HTTP con {url}: {e}")
+        if not await is_safe_url(url):
+            logger.warning(f"Intento de SSRF bloqueado: {url}")
             return result
-            
+
+        req_headers = {"User-Agent": USER_AGENT}
         try:
-            # Delegamos el análisis de privacidad (que aún tiene regex) a un hilo secundario
+            async with httpx.AsyncClient(verify=True, follow_redirects=False, timeout=HTTP_TIMEOUT, headers=req_headers) as client:
+                current_url = url
+                redirect_chain: List[str] = [current_url]
+                max_redirects = 10
+                redirect_count = 0
+
+                while redirect_count < max_redirects:
+                    async with client.stream("GET", current_url, timeout=HTTP_TIMEOUT) as response:
+                        content_length = response.headers.get("content-length")
+                        if content_length and int(content_length) > MAX_DOWNLOAD_BYTES:
+                            return result
+
+                        chunks = []
+                        bytes_read = 0
+                        async for chunk in response.aiter_bytes():
+                            bytes_read += len(chunk)
+                            if bytes_read > MAX_DOWNLOAD_BYTES:
+                                break
+                            chunks.append(chunk)
+
+                        html_bytes = b"".join(chunks)
+                        html_content = html_bytes.decode("utf-8", errors="ignore")
+                        response_headers = dict(response.headers)
+                        cookies_dict = {c.name: c.value for c in response.cookies.jar}
+
+                        if response.status_code in (301, 302, 303, 307, 308):
+                            location = response.headers.get("location")
+                            if not location: break
+                            from urllib.parse import urljoin
+                            next_url = urljoin(current_url, location)
+                            if not await is_safe_url(next_url): break
+                            redirect_chain.append(next_url)
+                            current_url = next_url
+                            redirect_count += 1
+                            continue
+                        break
+
+                result.redirect_chain = redirect_chain
+
+        except Exception as exc:
+            logger.warning(f"Error al conectar con {url}: {exc}")
+            return result
+
+        if len(html_content) > MAX_HTML_FOR_MODEL:
+            result.html_content = html_content[:MAX_HTML_FOR_MODEL]
+        else:
+            result.html_content = html_content
+
+        try:
             external_scripts, technologies, privacy = await asyncio.to_thread(
                 TechScanner._cpu_bound_analysis,
                 html_content,
                 response_headers,
                 cookies_dict,
-                hostname
+                hostname,
             )
-
             result.external_scripts = external_scripts
             result.technologies = technologies
             result.privacy_analysis = privacy
+        except Exception as exc:
+            logger.error(f"Error en análisis CPU-bound: {exc}")
 
-        except Exception as e:
-            logger.error(f"Error en el análisis asíncrono (CPU-bound) para {url}: {e}")
-
-        return result
+        return result
