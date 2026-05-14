@@ -95,6 +95,30 @@ app.add_middleware(
     max_age=600,
 )
 
+# Middleware que abre /health a cualquier origen (endpoint público de solo lectura).
+# Se añade DESPUÉS de CORSMiddleware para ejecutarse ANTES en la cadena de
+# middleware de Starlette (último en añadirse = primero en ejecutarse).
+@app.middleware("http")
+async def public_health_cors(request: Request, call_next):
+    """Permite CORS irrestricto para el endpoint /health."""
+    if request.url.path == "/health":
+        # Responder directamente al preflight OPTIONS sin llegar al router
+        if request.method == "OPTIONS":
+            from starlette.responses import Response as StarletteResponse
+            return StarletteResponse(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Max-Age": "600",
+                },
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+    return await call_next(request)
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
