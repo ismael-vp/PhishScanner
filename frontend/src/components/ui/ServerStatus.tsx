@@ -1,49 +1,30 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 
 type Status = 'checking' | 'online' | 'offline';
 
-const POLL_ONLINE_MS  = 30_000;  // cada 30 s cuando está online
-const POLL_OFFLINE_MS = 10_000;  // cada 10 s cuando está offline/checking (cold start Render)
-const FETCH_TIMEOUT_MS = 8_000;  // 8 s — Render free tier puede tardar más de 5 s
-
 export default function ServerStatus() {
   const [status, setStatus] = useState<Status>('checking');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const checkHealth = async () => {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      let next: Status = 'offline';
-
+    const checkServerHealth = async () => {
       try {
-        const res = await fetch(`${apiUrl}/health`, {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const response = await fetch(`${apiUrl}/api/app-info`, {
           method: 'GET',
           cache: 'no-store',
-          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          signal: AbortSignal.timeout(5000),
         });
-        next = res.ok ? 'online' : 'offline';
+        setStatus(response.ok ? 'online' : 'offline');
       } catch {
-        next = 'offline';
-      }
-
-      if (!cancelled) {
-        setStatus(next);
-        // Si está offline o checking reintenta más rápido para capturar el cold start
-        const delay = next === 'online' ? POLL_ONLINE_MS : POLL_OFFLINE_MS;
-        timerRef.current = setTimeout(checkHealth, delay);
+        setStatus('offline');
       }
     };
 
-    checkHealth();
-
-    return () => {
-      cancelled = true;
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
+    checkServerHealth();
+    const intervalId = setInterval(checkServerHealth, 60_000);
+    return () => clearInterval(intervalId);
   }, []);
 
   const ledStyles: Record<Status, string> = {
@@ -61,7 +42,7 @@ export default function ServerStatus() {
   const label: Record<Status, string> = {
     checking: 'Verificando servidor…',
     online:   'Servidor online',
-    offline:  'Servidor offline (despertando…)',
+    offline:  'Servidor offline',
   };
 
   return (

@@ -70,26 +70,23 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "Error interno del servidor.", "error_id": error_id},
     )
 
-@app.get("/health", tags=["Sistema"])
-async def health_check():
-    checks = {}
+@app.get("/api/app-info", tags=["Sistema"])
+async def system_info():
+    """Información básica del sistema — usada por el frontend para mostrar el estado."""
+    all_ok = True
     try:
         from utils.cache_service import CacheService
         CacheService()
-        checks["sqlite"] = "ok"
-    except Exception as exc:
-        checks["sqlite"] = f"error: {type(exc).__name__}"
+    except Exception:
+        all_ok = False
 
-    try:
-        from utils.openai_client import get_openai_client
-        checks["ai_client"] = "ok" if get_openai_client() else "not_configured"
-    except Exception as exc:
-        checks["ai_client"] = f"error: {type(exc).__name__}"
-
-    all_healthy = all(v == "ok" or v == "not_configured" for v in checks.values())
     return JSONResponse(
-        status_code=status.HTTP_200_OK if all_healthy else status.HTTP_503_SERVICE_UNAVAILABLE,
-        content={"status": "healthy" if all_healthy else "unhealthy", "checks": checks},
+        status_code=status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "status": "API operativa",
+            "engine": "PhishingScanner Core v1.0",
+            "environment": os.getenv("ENVIRONMENT", "development"),
+        },
     )
 
 from api.routes import router as analyze_router  # noqa: E402 — import after app init is intentional
