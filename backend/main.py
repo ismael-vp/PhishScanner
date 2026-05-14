@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 load_dotenv()
-from config import settings
+from config import settings  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Apagando PhishingScanner API...")
     try:
         from services.geo_scanner import GeoScanner
+
         from services.virustotal_service import VirusTotalService
         await VirusTotalService.close_client()
         await GeoScanner.close_client()

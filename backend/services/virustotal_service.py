@@ -280,10 +280,10 @@ class VirusTotalService:
                 raise HTTPException(status_code=504, detail="VT polling timeout.")
             except httpx.NetworkError:
                 raise HTTPException(status_code=502, detail="Error de red en VT polling.")
-            
+
             if response.status_code >= 400:
                 raise HTTPException(status_code=502, detail=f"VT error en polling: {response.status_code}")
-                
+
             try:
                 data = response.json()
             except Exception:

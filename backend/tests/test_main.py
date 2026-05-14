@@ -13,13 +13,13 @@ client = TestClient(app, headers={"host": "localhost"}, raise_server_exceptions=
 
 
 def test_health_check():
-    """El endpoint /health debe responder 200 con los checks del sistema."""
-    response = client.get("/health", headers={"host": "localhost"})
+    """El endpoint /api/app-info debe responder 200 con los checks del sistema."""
+    response = client.get("/api/app-info", headers={"host": "localhost"})
     assert response.status_code == 200
     body = response.json()
-    # La respuesta tiene "status" y "checks"
+    # La respuesta tiene "status" y "engine"
     assert "status" in body
-    assert "checks" in body
+    assert "engine" in body
 
 
 def test_analyze_url_empty_request():
