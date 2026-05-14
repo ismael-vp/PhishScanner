@@ -131,12 +131,9 @@ def _ensure_tesseract():
         pytesseract.get_tesseract_version()
         _tesseract_ready = True
     except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Tesseract OCR no está instalado o no se encuentra. "
-                "Instálalo con: winget install --id UB-Mannheim.TesseractOCR"
-            ),
+        # Bug #6 fix: lanzar RuntimeError, no HTTPException, desde dentro de un thread
+        raise RuntimeError(
+            "Tesseract OCR no está instalado o no se encuentra en el sistema."
         )
 
 def _extract_text_from_image_sync(image_bytes: bytes) -> str:
@@ -155,6 +152,9 @@ async def _api_call_with_retry(callable, max_retries: int = MAX_RETRIES):
     for attempt in range(max_retries + 1):
         try:
             return await callable()
+        except HTTPException:
+            # Bug #5 fix: las HTTPException propias no deben entrar al retry
+            raise
         except Exception as exc:
             last_exception = exc
             error_str = str(exc).lower()
@@ -208,6 +208,9 @@ class ImagePhishingService:
             extracted_text = await self.extract_text_from_image(image_bytes)
         except HTTPException:
             raise
+        except RuntimeError as exc:
+            # Bug #6 fix: RuntimeError lanzado desde _ensure_tesseract dentro del thread
+            raise HTTPException(status_code=500, detail=str(exc))
         except Exception as exc:
             logger.error(f"Error en OCR: {exc}", exc_info=True)
             raise HTTPException(

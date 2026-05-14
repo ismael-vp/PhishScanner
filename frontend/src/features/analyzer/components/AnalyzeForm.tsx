@@ -102,7 +102,7 @@ export default function AnalyzeForm() {
       }
     } catch (err: unknown) {
       // Manejamos el caso en que la petición fue cancelada intencionalmente
-      if (axios.isCancel(err)) {
+      if (axios.isCancel(err) || abortControllerRef.current?.signal.aborted) {
         console.log("Petición anterior cancelada para evitar sobreescritura de datos.");
         return;
       }
@@ -135,10 +135,13 @@ export default function AnalyzeForm() {
       } else {
         setError('Error de conexión con el servidor. ¿Está el backend encendido?');
       }
+    } finally {
+      // Fix Caos #4: solo desactivar el estado de carga si esta petición no ha sido abortada
+      // por una nueva petición que ya ha tomado el control.
+      if (!abortControllerRef.current?.signal.aborted) {
+        setIsScanning(false);
+      }
     }
-
-    // Desactivamos el estado de carga (tanto si hubo éxito como si hubo un error real)
-    setIsScanning(false);
   };
 
 

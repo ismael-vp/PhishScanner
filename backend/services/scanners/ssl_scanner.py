@@ -59,10 +59,17 @@ def _analyze_issuer(issuer_name: str | None) -> tuple[str | None, bool, bool]:
         indicator in issuer_lower
         for indicator in ("self signed", "self-signed", "localhost", "unknown")
     )
-    is_suspicious = any(
-        suspicious in issuer_lower
-        for suspicious in SUSPICIOUS_ISSUERS
-    ) or is_self_signed
+    # Bug #9 fix: usar palabras completas para "ca" y "root" para evitar
+    # falsos positivos en issuers legítimos como "DigiCert Global CA"
+    import re as _re
+    _SUSPICIOUS_EXACT = {"self-signed", "localhost", "example.com", "test", "dummy", "unknown", "none", ""}
+    _SUSPICIOUS_WORD  = {"ca", "root"}
+    is_suspicious = (
+        is_self_signed
+        or any(s in issuer_lower for s in _SUSPICIOUS_EXACT)
+        or any(bool(_re.search(rf"\b{_re.escape(w)}\b", issuer_lower)) for w in _SUSPICIOUS_WORD
+               if issuer_lower == w)  # solo coincidencia exacta para palabras cortas
+    )
 
     return issuer_name, is_self_signed, is_suspicious
 

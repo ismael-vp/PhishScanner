@@ -162,6 +162,9 @@ async def _api_call_with_retry(callable, max_retries: int = MAX_RETRIES):
     for attempt in range(max_retries + 1):
         try:
             return await callable()
+        except HTTPException:
+            # Bug #5 fix: las HTTPException propias no deben entrar al retry
+            raise
         except Exception as exc:
             last_exception = exc
             error_str = str(exc).lower()
@@ -284,7 +287,15 @@ class AIService:
                     detail="La IA no generó una respuesta válida."
                 )
 
-            content = response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            # Fix Caos #5: content puede ser None si OpenAI activa filtros de contenido
+            if not content:
+                logger.warning("OpenAI devolvió content=None en generate_analysis_explanation")
+                raise HTTPException(
+                    status_code=502,
+                    detail="La IA no generó una respuesta. Intenta de nuevo."
+                )
+            content = content.strip()
             if not content:
                 raise HTTPException(
                     status_code=502,
@@ -360,7 +371,12 @@ class AIService:
                     detail="La IA no generó una respuesta."
                 )
 
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            # Fix Caos #5: content puede ser None si OpenAI activa filtros
+            if not content:
+                logger.warning("OpenAI devolvió content=None en chat_with_context")
+                raise HTTPException(status_code=502, detail="La IA no generó respuesta.")
+            return content.strip()
 
         except HTTPException:
             raise
@@ -412,7 +428,12 @@ class AIService:
                     detail="La IA no generó una explicación."
                 )
 
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            # Fix Caos #5: content puede ser None si OpenAI activa filtros
+            if not content:
+                logger.warning("OpenAI devolvió content=None en explain_script")
+                raise HTTPException(status_code=502, detail="La IA no generó explicación.")
+            return content.strip()
 
         except HTTPException:
             raise

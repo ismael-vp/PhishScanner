@@ -16,6 +16,10 @@ from services.scanners.whois_scanner import WhoisScanner
 
 logger = logging.getLogger(__name__)
 
+async def _null_coro():
+    """Coroutine nula: usada como placeholder en asyncio.gather cuando se omite un scanner."""
+    return None
+
 class OSINTService:
 
     @staticmethod
@@ -31,7 +35,8 @@ class OSINTService:
     @staticmethod
     async def get_osint_data(url: str) -> OSINTResponse:
         parsed_url = urlparse(url)
-        hostname = parsed_url.netloc if parsed_url.netloc else parsed_url.path.split('/')[0]
+        # parsed_url.hostname strip el puerto (ej. example.com:8080 → example.com)
+        hostname = parsed_url.hostname or (parsed_url.path.split('/')[0].split(':')[0])
 
         if not hostname:
             return OSINTResponse()
@@ -47,7 +52,8 @@ class OSINTService:
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(
-                    GeoScanner.get_geolocation_and_reputation(ip_address),
+                    # Bug #1 fix: si ip_address es None, saltamos GeoScanner con coroutine nula
+                    GeoScanner.get_geolocation_and_reputation(ip_address) if ip_address else _null_coro(),
                     WhoisScanner.get_whois(hostname),
                     SSLScanner.get_ssl_info(hostname),
                     TechScanner.get_tech_and_scripts(url, hostname),

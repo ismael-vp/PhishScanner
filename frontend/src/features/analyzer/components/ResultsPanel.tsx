@@ -24,8 +24,9 @@ function ResultsPanelInner() {
   // We can provide a mock scanResult or just conditionally render a wrapper component?
   // Let's check how to handle this correctly.
 
-  // Custom hooks
-  const aiChat = useAiChat(scanResult as ScanResult);
+  // Bug #3 fix: useAiChat siempre se llama (regla de hooks), pero nunca con null —
+  // si scanResult es null pasamos un objeto vacío para que scan_context llegue como {}
+  const aiChat = useAiChat((scanResult ?? {}) as ScanResult);
   const scriptAnalyzer = useScriptAnalyzer();
 
   if (error) {

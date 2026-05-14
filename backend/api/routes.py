@@ -1,6 +1,8 @@
 import hashlib
 import json
 import logging
+import os
+import secrets
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -77,6 +79,74 @@ async def rate_limit_dependency(request: Request):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Demasiadas solicitudes. Por favor, espera un momento."
+        )
+
+def _get_admin_key() -> str:
+    """Lee la clave admin del entorno."""
+    return os.getenv("ADMIN_SECRET_KEY", "").strip()
+
+def _serialize_osint(osint: Any) -> dict:
+    """
+    Serializa OSINTResponse incluyendo las @property como campos planos.
+    Pydantic model_dump() omite las @property — este helper las añade al nivel raíz
+    para que el frontend pueda acceder a ellas con las claves que espera.
+    """
+    if osint is None:
+        return {}
+    if isinstance(osint, dict):
+        return osint
+
+    d = osint.model_dump() if hasattr(osint, "model_dump") else osint.dict()
+
+    # --- Aplanar @property de OSINTResponse al nivel raíz ---
+    if hasattr(osint, "external_scripts"):
+        d["external_scripts"]   = osint.external_scripts
+    if hasattr(osint, "redirect_chain"):
+        d["redirect_chain"]     = osint.redirect_chain
+    if hasattr(osint, "technologies"):
+        d["technologies"]       = osint.technologies
+    if hasattr(osint, "html_content"):
+        d["html_content"]       = osint.html_content
+    if hasattr(osint, "privacy_analysis") and callable(type(osint).privacy_analysis.fget):
+        pa = osint.privacy_analysis
+        d["privacy_analysis"]   = pa.model_dump() if pa and hasattr(pa, "model_dump") else pa
+    if hasattr(osint, "is_typosquatting"):
+        d["is_typosquatting"]   = osint.is_typosquatting
+    if hasattr(osint, "target_brand"):
+        d["target_brand"]       = osint.target_brand
+    if hasattr(osint, "has_dangerous_form"):
+        d["has_dangerous_form"] = osint.has_dangerous_form
+    if hasattr(osint, "reason"):
+        d["reason"]             = osint.reason
+    if hasattr(osint, "url_structure"):
+        us = osint.url_structure
+        d["url_structure"]      = us.model_dump() if us and hasattr(us, "model_dump") else us
+
+    # --- Fix camelCase: el frontend usa abuseConfidenceScore / totalReports ---
+    if "abuse_confidence_score" in d:
+        d["abuseConfidenceScore"] = d.pop("abuse_confidence_score")
+    if "total_reports" in d:
+        d["totalReports"] = d.pop("total_reports")
+
+    return d
+
+async def admin_key_dependency(request: Request):
+    """Valida el header X-Admin-Key contra ADMIN_SECRET_KEY."""
+    provided = request.headers.get("X-Admin-Key", "")
+    expected = _get_admin_key()
+
+    if not expected:
+        logger.error("ADMIN_SECRET_KEY no está configurada en el entorno")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Endpoint de administración no disponible."
+        )
+
+    if not provided or not secrets.compare_digest(provided.encode(), expected.encode()):
+        logger.warning(f"Intento de acceso admin fallido desde {get_client_ip(request)}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Clave de administración incorrecta o ausente."
         )
 
 def serialize_to_dict(obj: Any) -> Any:
@@ -188,6 +258,9 @@ async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
         vt_stats = await vt_service.get_url_report(request.url)
         osint_data = await OSINTService.get_osint_data(request.url)
 
+        # Bug #8 fix: copiar el dict antes de mutarlo (evita race condition en concurrencia)
+        vt_stats = dict(vt_stats)
+
         # Heurística de Respaldo
         if vt_stats.get("malicious", 0) == 0 and vt_stats.get("suspicious", 0) == 0:
             is_suspicious_osint = False
@@ -222,7 +295,7 @@ async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
             "type": "url",
             "stats": vt_stats,
             "ai_summary": ai_summary,
-            "osint_data": serialize_to_dict(osint_data),
+            "osint_data": _serialize_osint(osint_data),  # Fix Caos #1+#2
             "status": "success"
         }
 
@@ -355,10 +428,10 @@ async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):  #
 @router.post(
     "/admin/clear-cache",
     tags=["Admin"],
-    dependencies=[Depends(rate_limit_dependency)]
+    dependencies=[Depends(rate_limit_dependency), Depends(admin_key_dependency)]
 )
 async def clear_cache():
-    """Limpia manualmente toda la base de datos de caché."""
+    """Limpia manualmente toda la base de datos de caché. Requiere X-Admin-Key."""
     success = cache_service.clear_all()
     if success:
         return {"status": "success", "message": "Caché eliminada correctamente."}

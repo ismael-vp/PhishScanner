@@ -166,6 +166,9 @@ class TyposquattingData(BaseModel):
 
     is_typosquatting: bool = False
     target_brand: str | None = Field(None, max_length=100)
+    # Campos usados por TyposquattingScanner (necesarios para evitar ValidationError con extra=forbid)
+    confidence: float | None = Field(None, ge=0.0, le=1.0, description="Confianza de la detección 0.0-1.0")
+    technique: str | None = Field(None, max_length=50, description="Técnica de detección usada")
 
 class FormData(BaseModel):
     model_config = ConfigDict(extra="forbid")
