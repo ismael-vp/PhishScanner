@@ -253,16 +253,20 @@ async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
         )
         
         vt_result, osint_result = results
+        
+        has_errors = False
 
         if isinstance(vt_result, Exception):
             logger.warning(f"VirusTotal falló. Activando contingencia heurística. Error: {vt_result}")
             vt_stats = {"malicious": 0, "suspicious": 0, "error": str(vt_result)}
+            has_errors = True
         else:
             vt_stats = vt_result
 
         if isinstance(osint_result, Exception):
             logger.error(f"OSINT falló críticamente: {osint_result}")
             osint_data = None
+            has_errors = True
         else:
             osint_data = osint_result
 
@@ -307,7 +311,9 @@ async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
             "status": "success"
         }
 
-        cache_service.set(url_cache_key, result, "url")
+        if not has_errors:
+            cache_service.set(url_cache_key, result, "url")
+            
         return result
 
     except HTTPException:
