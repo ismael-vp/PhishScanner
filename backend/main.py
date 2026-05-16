@@ -93,6 +93,12 @@ async def system_info():
         },
     )
 
+@app.get("/health", tags=["Sistema"])
+async def health_check():
+    """Endpoint simplificado para Healthchecks de Docker/K8s."""
+    return {"status": "ok"}
+
+
 from api.routes import router as analyze_router  # noqa: E402 — import after app init is intentional
 
 app.include_router(analyze_router, prefix="/api")
