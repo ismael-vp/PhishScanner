@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import secrets
-import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -114,7 +113,7 @@ def _serialize_osint(osint: Any) -> dict:
         d["abuseConfidenceScore"] = d.pop("abuse_confidence_score")
     if "total_reports" in d:
         d["totalReports"] = d.pop("total_reports")
-    
+
     # CamelCase para Geolocation
     if d.get("geolocation"):
         geo = d["geolocation"]
@@ -257,9 +256,9 @@ async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
             OSINTService.get_osint_data(request.url),
             return_exceptions=True
         )
-        
+
         vt_result, osint_result = results
-        
+
         has_errors = False
 
         if isinstance(vt_result, Exception):
@@ -319,7 +318,7 @@ async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
 
         if not has_errors:
             cache_service.set(url_cache_key, result, "url")
-            
+
         return result
 
     except HTTPException:

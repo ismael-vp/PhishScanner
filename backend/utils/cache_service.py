@@ -5,9 +5,10 @@ import os
 import re
 import sqlite3
 import time
-import redis
 from datetime import datetime, timedelta
 from typing import Any
+
+import redis
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class CacheService:
         self.use_redis = False
         self.redis_client = None
         self._local_rl_store = {}
-        
+
         if REDIS_URL:
             try:
                 # Usar Redis si REDIS_URL está presente
@@ -98,7 +99,7 @@ class CacheService:
             except Exception as e:
                 logger.error(f"❌ Fallo al conectar a Redis: {e}. Usando SQLite local.")
                 self.use_redis = False
-                
+
         if not self.use_redis:
             self.db_path = _get_db_path(db_path)
             self._last_cleanup = 0.0
@@ -204,7 +205,7 @@ class CacheService:
         now = time.time()
         if len(self._local_rl_store) > 10000:
             self._local_rl_store.clear()
-            
+
         window = self._local_rl_store.get(client_ip, [])
         window = [t for t in window if now - t < window_seconds]
         if len(window) >= max_requests:
@@ -231,11 +232,11 @@ class CacheService:
                 data_blob = self.redis_client.get(redis_key)
                 if not data_blob:
                     return None
-                
+
                 # Check for gzip magic bytes
                 if data_blob.startswith(b'\x1f\x8b'):
                     data_blob = gzip.decompress(data_blob)
-                    
+
                 return json.loads(data_blob.decode("utf-8"))
             except Exception as e:
                 logger.error(f"Error leyendo de Redis: {e}")
@@ -283,12 +284,12 @@ class CacheService:
             try:
                 data_str = _safe_json_dumps(data)
                 data_bytes = data_str.encode("utf-8")
-                
+
                 if COMPRESSION_ENABLED and len(data_bytes) > COMPRESSION_THRESHOLD:
                     compressed_data = gzip.compress(data_bytes, compresslevel=6)
                     if len(compressed_data) < len(data_bytes):
                         data_bytes = compressed_data
-                        
+
                 redis_key = f"cache:{cache_type}:{key}"
                 ttl_seconds = DEFAULT_TTL_HOURS * 3600
                 self.redis_client.setex(redis_key, ttl_seconds, data_bytes)
