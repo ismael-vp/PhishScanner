@@ -114,6 +114,12 @@ def _serialize_osint(osint: Any) -> dict:
         d["abuseConfidenceScore"] = d.pop("abuse_confidence_score")
     if "total_reports" in d:
         d["totalReports"] = d.pop("total_reports")
+    
+    # CamelCase para Geolocation
+    if d.get("geolocation"):
+        geo = d["geolocation"]
+        if "country_code" in geo:
+            geo["countryCode"] = geo.pop("country_code")
 
     return d
 
