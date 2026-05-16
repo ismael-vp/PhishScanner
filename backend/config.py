@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     @classmethod
     def parse_allowed_origins(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+            return [origin.strip().rstrip('/') for origin in v.split(",") if origin.strip()]
+        return [origin.rstrip('/') for origin in v]
 
     # Secretos Obligatorios
     ADMIN_SECRET_KEY: str
