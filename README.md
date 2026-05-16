@@ -21,7 +21,7 @@ cd PhishingScanner
 ```
 
 Crea los archivos `.env` (usa los `.example` como guía):
-* `backend/.env`: Necesitas `VT_API_KEY`, `OPENAI_API_KEY` y `ALLOWED_ORIGINS`.
+* `backend/.env`: Necesitas `VT_API_KEY`, `OPENAI_API_KEY`, `ADMIN_SECRET_KEY` y `ALLOWED_ORIGINS`. Opcionalmente `REDIS_URL` para caché distribuida y `ABUSEIPDB_API_KEY`.
 * `frontend/.env`: Necesitas `NEXT_PUBLIC_API_URL` (por defecto `http://localhost:8000`).
 
 **2. Levantar el ecosistema:**
@@ -47,14 +47,16 @@ PhishingScanner/
 │   ├── api/                  # Controladores y Endpoints expuestos al cliente
 │   ├── services/             # Lógica core (Orquestador OSINT, Web Scrapers, IA)
 │   ├── models/               # Esquemas de validación de datos (Pydantic)
-│   └── threat_cache.db       # BBDD embebida (SQLite) para optimización y caché
+│   ├── utils/cache_service.py# Sistema Dual de Caché Inteligente (Redis / SQLite)
+│   └── threat_cache.db       # Caché embebida local (fallback de Redis)
 └── docker-compose.yml        # Orquestación de contenedores y redes virtuales
 ```
 
 ## Consideraciones de Seguridad y Despliegue
 
-* **Caché Eficiente:** El backend utiliza SQLite para almacenar resultados temporalmente. Esto evita agotar las cuotas de tus APIs de pago (VirusTotal/OpenAI) ante peticiones repetidas.
-* **CORS:** En producción, modifica la variable `ALLOWED_ORIGINS` para que únicamente el dominio de tu frontend pueda realizar consultas a la API.
+* **Caché Inteligente e Inmutable (Redis + SQLite):** En producción el sistema utiliza **Redis (ej. Upstash)** con soporte de *fallback* automático a SQLite. Esto no solo evita agotar cuotas de las APIs (VirusTotal/OpenAI), sino que cuenta con un sistema antienvenenamiento que evita guardar análisis con fallos de API.
+* **Endpoint de Limpieza:** Cuenta con la ruta protegida (`/api/admin/clear-cache`) gestionada por tu `ADMIN_SECRET_KEY` para purgar los servidores de caché instantáneamente de forma remota.
+* **CORS y Autodefensa:** Modifica la variable `ALLOWED_ORIGINS` para que únicamente el dominio de tu frontend pueda realizar consultas. El sistema automáticamente neutraliza barras extra para garantizar protección exacta.
 * **Plataformas:** 
   * Frontend optimizado para despliegue automático (Zero-config) en **Vercel**. 
   * Backend preparado para despliegue en contenedores vía **Render**, **Railway** o cualquier servidor **VPS**.
