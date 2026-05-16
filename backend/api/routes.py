@@ -1,24 +1,30 @@
-import os
-import logging
 import hashlib
-import hmac
-import time
 import json
-from typing import List, Dict, Any
+import logging
+import os
+import secrets
+import time
+from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import (
-    APIRouter, File, UploadFile, HTTPException, Body, Header,
-    Request, status, Depends
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
 )
 from pydantic import BaseModel, Field, field_validator
 
-from services.virustotal_service import VirusTotalService
 from services.ai_service import AIService
-from services.osint_service import OSINTService
 from services.image_phishing_service import ImagePhishingService
-from utils.cache_service import CacheService
+from services.osint_service import OSINTService
 from services.utils import is_safe_url
+from services.virustotal_service import VirusTotalService
+from utils.cache_service import CacheService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,6 +44,7 @@ IMAGE_ALLOWED_TYPES = {
     "image/jpeg", "image/png", "image/webp",
     "image/gif", "image/bmp", "image/tiff"
 }
+
 
 def get_client_ip(request: Request) -> str:
     """Extrae la IP real del cliente respetando headers de proxy."""
@@ -59,6 +66,74 @@ async def rate_limit_dependency(request: Request):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Demasiadas solicitudes. Por favor, espera un momento."
+        )
+
+def _get_admin_key() -> str:
+    """Lee la clave admin del entorno."""
+    return os.getenv("ADMIN_SECRET_KEY", "").strip()
+
+def _serialize_osint(osint: Any) -> dict:
+    """
+    Serializa OSINTResponse incluyendo las @property como campos planos.
+    Pydantic model_dump() omite las @property — este helper las añade al nivel raíz
+    para que el frontend pueda acceder a ellas con las claves que espera.
+    """
+    if osint is None:
+        return {}
+    if isinstance(osint, dict):
+        return osint
+
+    d = osint.model_dump() if hasattr(osint, "model_dump") else osint.dict()
+
+    # --- Aplanar @property de OSINTResponse al nivel raíz ---
+    if hasattr(osint, "external_scripts"):
+        d["external_scripts"]   = osint.external_scripts
+    if hasattr(osint, "redirect_chain"):
+        d["redirect_chain"]     = osint.redirect_chain
+    if hasattr(osint, "technologies"):
+        d["technologies"]       = osint.technologies
+    if hasattr(osint, "html_content"):
+        d["html_content"]       = osint.html_content
+    if hasattr(osint, "privacy_analysis") and callable(type(osint).privacy_analysis.fget):
+        pa = osint.privacy_analysis
+        d["privacy_analysis"]   = pa.model_dump() if pa and hasattr(pa, "model_dump") else pa
+    if hasattr(osint, "is_typosquatting"):
+        d["is_typosquatting"]   = osint.is_typosquatting
+    if hasattr(osint, "target_brand"):
+        d["target_brand"]       = osint.target_brand
+    if hasattr(osint, "has_dangerous_form"):
+        d["has_dangerous_form"] = osint.has_dangerous_form
+    if hasattr(osint, "reason"):
+        d["reason"]             = osint.reason
+    if hasattr(osint, "url_structure"):
+        us = osint.url_structure
+        d["url_structure"]      = us.model_dump() if us and hasattr(us, "model_dump") else us
+
+    # --- Fix camelCase: el frontend usa abuseConfidenceScore / totalReports ---
+    if "abuse_confidence_score" in d:
+        d["abuseConfidenceScore"] = d.pop("abuse_confidence_score")
+    if "total_reports" in d:
+        d["totalReports"] = d.pop("total_reports")
+
+    return d
+
+async def admin_key_dependency(request: Request):
+    """Valida el header X-Admin-Key contra ADMIN_SECRET_KEY."""
+    provided = request.headers.get("X-Admin-Key", "")
+    expected = _get_admin_key()
+
+    if not expected:
+        logger.error("ADMIN_SECRET_KEY no está configurada en el entorno")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Endpoint de administración no disponible."
+        )
+
+    if not provided or not secrets.compare_digest(provided.encode(), expected.encode()):
+        logger.warning(f"Intento de acceso admin fallido desde {get_client_ip(request)}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Clave de administración incorrecta o ausente."
         )
 
 def serialize_to_dict(obj: Any) -> Any:
@@ -131,12 +206,12 @@ class ChatMessage(BaseModel):
     content: str = Field(..., min_length=1, max_length=MAX_CHAT_CONTENT_LENGTH)
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage] = Field(..., max_length=MAX_CHAT_MESSAGES)
-    scan_context: Dict[str, Any] = Field(default_factory=dict)
+    messages: list[ChatMessage] = Field(..., max_length=MAX_CHAT_MESSAGES)
+    scan_context: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("scan_context")
     @classmethod
-    def limit_context_size(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+    def limit_context_size(cls, v: dict[str, Any]) -> dict[str, Any]:
         try:
             size = len(json.dumps(v))
         except (TypeError, ValueError):
@@ -159,10 +234,11 @@ class ScriptExplainRequest(BaseModel):
     "/analyze/url",
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def analyze_url(request: URLRequest = Body(...)):
+async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
     """Analiza una URL en busca de phishing, malware y anomalías."""
     try:
-        cached_result = cache_service.get(request.url, "url")
+        url_cache_key = hashlib.sha256(request.url.encode()).hexdigest()
+        cached_result = cache_service.get(url_cache_key, "url")
         if cached_result:
             return cached_result
 
@@ -189,6 +265,9 @@ async def analyze_url(request: URLRequest = Body(...)):
             osint_data = None
         else:
             osint_data = osint_result
+
+        # Bug #8 fix: copiar el dict antes de mutarlo (evita race condition en concurrencia)
+        vt_stats = dict(vt_stats)
 
         # Heurística de Respaldo
         if vt_stats.get("malicious", 0) == 0 and vt_stats.get("suspicious", 0) == 0:
@@ -224,11 +303,11 @@ async def analyze_url(request: URLRequest = Body(...)):
             "type": "url",
             "stats": vt_stats,
             "ai_summary": ai_summary,
-            "osint_data": serialize_to_dict(osint_data),
+            "osint_data": _serialize_osint(osint_data),  # Fix Caos #1+#2
             "status": "success"
         }
 
-        cache_service.set(request.url, result, "url")
+        cache_service.set(url_cache_key, result, "url")
         return result
 
     except HTTPException:
@@ -244,7 +323,7 @@ async def analyze_url(request: URLRequest = Body(...)):
     "/analyze/image",
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def analyze_image(file: UploadFile = File(...)):
+async def analyze_image(file: UploadFile = File(...)):  # noqa: B008
     """Analiza una imagen en busca de phishing mediante OCR e IA."""
     if not file.filename:
         raise HTTPException(
@@ -304,7 +383,7 @@ async def analyze_image(file: UploadFile = File(...)):
     "/chat",
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def chat_endpoint(request: ChatRequest = Body(...)):
+async def chat_endpoint(request: ChatRequest = Body(...)):  # noqa: B008
     """Endpoint de chat con contexto del escaneo."""
     try:
         clean_context = request.scan_context.copy()
@@ -340,7 +419,7 @@ async def chat_endpoint(request: ChatRequest = Body(...)):
     "/explain-script",
     dependencies=[Depends(rate_limit_dependency)]
 )
-async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):
+async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):  # noqa: B008
     """Explica un script remoto."""
     try:
         explanation = await ai_service.explain_script(request.script_url)
@@ -357,34 +436,10 @@ async def explain_script_endpoint(request: ScriptExplainRequest = Body(...)):
 @router.post(
     "/admin/clear-cache",
     tags=["Admin"],
-    dependencies=[Depends(rate_limit_dependency)]
+    dependencies=[Depends(rate_limit_dependency), Depends(admin_key_dependency)]
 )
-async def clear_cache(
-    x_admin_key: str = Header(
-        ...,
-        min_length=1,
-        description="Clave de acceso de administrador"
-    )
-):
-    """Limpia manualmente toda la base de datos de caché."""
-    admin_secret = os.getenv("ADMIN_SECRET_KEY", "").strip()
-
-    if len(admin_secret) < 16:
-        logger.error(
-            "ADMIN_SECRET_KEY no está configurada o no cumple longitud mínima de seguridad (16 chars)."
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Servicio de administración no configurado correctamente."
-        )
-
-    if not hmac.compare_digest(x_admin_key, admin_secret):
-        logger.warning("Intento de acceso denegado a /api/admin/clear-cache.")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acceso denegado: Credenciales no válidas."
-        )
-
+async def clear_cache():
+    """Limpia manualmente toda la base de datos de caché. Requiere X-Admin-Key."""
     success = cache_service.clear_all()
     if success:
         return {"status": "success", "message": "Caché eliminada correctamente."}
@@ -393,4 +448,3 @@ async def clear_cache(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No se pudo eliminar la caché."
         )
-

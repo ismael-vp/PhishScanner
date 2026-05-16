@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Optional, List, Union
 
 import whois
 
@@ -50,18 +49,22 @@ def _validate_hostname(hostname: str) -> str:
     if len(hostname) > MAX_HOSTNAME_LENGTH:
         raise ValueError(f"Hostname demasiado largo: {len(hostname)}")
 
+    # Fix: separar la detección de IP del except genérico para no silenciar
+    # el ValueError de rechazo con el mismo bloque que lo captura.
     try:
         ipaddress.ip_address(hostname)
-        raise ValueError(f"WHOIS no acepta IPs: {hostname}")
+        is_ip = True
     except ValueError:
-        pass
+        is_ip = False
+    if is_ip:
+        raise ValueError(f"WHOIS no acepta IPs: {hostname}")
 
     if not re.match(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)*$", hostname):
         raise ValueError(f"Hostname con formato inválido: {hostname}")
 
     return hostname
 
-def _parse_whois_date(date_value: Optional[Union[datetime, str, List]]) -> Optional[str]:
+def _parse_whois_date(date_value: datetime | str | list | None) -> str | None:
     """Parsea una fecha de WHOIS a formato ISO 8601."""
     if date_value is None:
         return None
@@ -94,14 +97,14 @@ def _parse_whois_date(date_value: Optional[Union[datetime, str, List]]) -> Optio
 
     return None
 
-def _is_redacted(value: Optional[str]) -> bool:
+def _is_redacted(value: str | None) -> bool:
     """Detecta si un valor WHOIS está redacted/oculto."""
     if not value or not isinstance(value, str):
         return True
     value_lower = value.lower().strip()
     return any(indicator in value_lower for indicator in REDACTED_INDICATORS)
 
-def _extract_registrar(registrar_value: Optional[Union[str, List]]) -> Optional[str]:
+def _extract_registrar(registrar_value: str | list | None) -> str | None:
     """Extrae el nombre del registrar de un valor."""
     if registrar_value is None:
         return None
@@ -148,7 +151,7 @@ class WhoisScanner:
     """Escáner de registros WHOIS."""
 
     @staticmethod
-    async def get_whois(hostname: str) -> Optional[WhoisData]:
+    async def get_whois(hostname: str) -> WhoisData | None:
         """Obtiene información WHOIS de un dominio."""
         try:
             safe_hostname = _validate_hostname(hostname)

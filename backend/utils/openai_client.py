@@ -12,7 +12,10 @@ def get_openai_client() -> AsyncOpenAI | None:
         logger.error("OPENAI_API_KEY no configurada.")
         return None
 
-    base_url = os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    # Si no se configura OPENAI_BASE_URL, se usa el proxy ChatAnywhere por defecto
+    # ya que la clave sk-DK54V... es una clave de ChatAnywhere, no de OpenAI oficial.
+    _default_base = "https://api.chatanywhere.tech/v1"
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip() or _default_base
     provider_name = "ChatAnywhere" if "chatanywhere" in base_url.lower() else "OpenAI"
 
     try:

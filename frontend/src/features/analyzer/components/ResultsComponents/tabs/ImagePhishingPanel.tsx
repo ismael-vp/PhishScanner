@@ -48,14 +48,12 @@ export default function ImagePhishingPanel({ analysis, imageName }: ImagePhishin
     <div className="w-full max-w-5xl mx-auto mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-6">
 
       {/* Veredicto Principal */}
-      <div className={`rounded-lg border p-6 flex items-start space-x-5 ${
-        is_phishing
+      <div className={`rounded-lg border p-6 flex items-start space-x-5 ${is_phishing
           ? 'bg-red-500/5 border-red-900/50'
           : 'bg-green-500/5 border-green-900/40'
-      }`}>
-        <div className={`p-2.5 rounded-xl border flex-shrink-0 ${
-          is_phishing ? 'bg-red-500/10 border-red-500/20' : 'bg-green-500/10 border-green-500/20'
         }`}>
+        <div className={`p-2.5 rounded-xl border flex-shrink-0 ${is_phishing ? 'bg-red-500/10 border-red-500/20' : 'bg-green-500/10 border-green-500/20'
+          }`}>
           {is_phishing
             ? <ShieldAlert size={36} className="text-red-500" />
             : <ShieldCheck size={36} className="text-green-500" />
@@ -66,15 +64,13 @@ export default function ImagePhishingPanel({ analysis, imageName }: ImagePhishin
             <h2 className="text-2xl font-bold text-white tracking-tight">
               {is_phishing ? 'Señales de Phishing' : 'Sin señales de peligro'}
             </h2>
-            <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-widest ${
-              is_phishing ? 'text-red-500 border-red-500/20 bg-red-500/10' : 'text-green-500 border-green-500/20 bg-green-500/10'
-            }`}>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-widest ${is_phishing ? 'text-red-500 border-red-500/20 bg-red-500/10' : 'text-green-500 border-green-500/20 bg-green-500/10'
+              }`}>
               {is_phishing ? 'Inseguro' : 'Seguro'}
             </span>
             {confidence !== 'Baja' && (
-              <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-widest ${
-                CONFIDENCE_COLORS[confidence] ?? 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20'
-              }`}>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-widest ${CONFIDENCE_COLORS[confidence] ?? 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20'
+                }`}>
                 Confianza {confidence}
               </span>
             )}
@@ -153,7 +149,7 @@ export default function ImagePhishingPanel({ analysis, imageName }: ImagePhishin
       )}
 
       {/* Chat de IA */}
-      <AiChatPanel 
+      <AiChatPanel
         chatMessages={aiChat.chatMessages}
         chatInput={aiChat.chatInput}
         setChatInput={aiChat.setChatInput}

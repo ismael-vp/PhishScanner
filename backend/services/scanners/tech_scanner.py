@@ -1,16 +1,13 @@
 import asyncio
-import ipaddress
 import logging
 import os
 import re
-import socket
-from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
-from models.osint_models import TechData, PrivacyData
+from models.osint_models import PrivacyData, TechData
 from services.utils import is_safe_url
 
 logger = logging.getLogger(__name__)
@@ -23,7 +20,7 @@ USER_AGENT = os.getenv(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 )
 
-TRACKER_PATTERNS: List[Tuple[str, List[str]]] = [
+TRACKER_PATTERNS: list[tuple[str, list[str]]] = [
     ("doubleclick.net", ["Cookies de Terceros", "Rastreo Publicitario"]),
     ("google-analytics.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
     ("googletagmanager.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
@@ -52,7 +49,7 @@ TRACKER_PATTERNS: List[Tuple[str, List[str]]] = [
     ("mixpanel.com", ["Cookies de Terceros", "Rastreo Publicitario"]),
 ]
 
-STORAGE_PATTERNS: List[Tuple[str, str]] = [
+STORAGE_PATTERNS: list[tuple[str, str]] = [
     ("localstorage", "Almacenamiento Local (LocalStorage)"),
     ("window.localstorage", "Almacenamiento Local (LocalStorage)"),
     ("sessionstorage", "Almacenamiento de Sesión (SessionStorage)"),
@@ -61,14 +58,14 @@ STORAGE_PATTERNS: List[Tuple[str, str]] = [
     ("window.indexeddb", "Base de Datos Local (IndexedDB)"),
 ]
 
-DATA_LINKED_REGEX: List[Tuple[re.Pattern, str]] = [
+DATA_LINKED_REGEX: list[tuple[re.Pattern, str]] = [
     (re.compile(r'''type=["']email["']''', re.I), "Correo Electrónico"),
     (re.compile(r'''name=["']email["']''', re.I), "Correo Electrónico"),
     (re.compile(r'''type=["']tel["']''', re.I), "Número de Teléfono"),
     (re.compile(r'''name=["'](phone|tel)["']''', re.I), "Número de Teléfono"),
 ]
 
-DATA_LINKED_SIMPLE: List[Tuple[str, str]] = [
+DATA_LINKED_SIMPLE: list[tuple[str, str]] = [
     ("accounts.google.com/gsi/client", "Perfil de Google"),
     ("gapi.auth2", "Perfil de Google"),
     ("connect.facebook.net", "Perfil de Facebook"),
@@ -79,7 +76,7 @@ DATA_LINKED_SIMPLE: List[Tuple[str, str]] = [
     ("paypal.com/sdk", "Datos Financieros (PayPal)"),
 ]
 
-DEVICE_ACCESS_PATTERNS: List[Tuple[str, str]] = [
+DEVICE_ACCESS_PATTERNS: list[tuple[str, str]] = [
     ("getusermedia", "Cámara y Micrófono"),
     ("enumeratedevices", "Cámara y Micrófono"),
     ("requestpermission", "Notificaciones Push"),
@@ -90,7 +87,7 @@ DEVICE_ACCESS_PATTERNS: List[Tuple[str, str]] = [
     ("navigator.usb", "Puertos USB"),
 ]
 
-FINGERPRINTING_PATTERNS: List[Tuple[str, str]] = [
+FINGERPRINTING_PATTERNS: list[tuple[str, str]] = [
     ("todataurl", "Huella Digital (Canvas Fingerprinting)"),
     ("audiocontext", "Huella Digital (Audio Fingerprinting)"),
     ("oscillator", "Huella Digital (Audio Fingerprinting)"),
@@ -107,12 +104,12 @@ def _is_safe_redirect(url: str) -> bool:
     """Valida que una URL de redirección sea segura."""
     return is_safe_url(url)
 
-def _analyze_privacy(html_lower: str, external_scripts: List[str]) -> PrivacyData:
+def _analyze_privacy(html_lower: str, external_scripts: list[str]) -> PrivacyData:
     """Analiza el HTML en busca de indicadores de privacidad."""
     privacy = PrivacyData()
-    tracking_used: Set[str] = set()
-    data_linked: Set[str] = set()
-    device_access: Set[str] = set()
+    tracking_used: set[str] = set()
+    data_linked: set[str] = set()
+    device_access: set[str] = set()
     trackers_count = 0
 
     for script_url in external_scripts:
@@ -164,12 +161,12 @@ def _analyze_privacy(html_lower: str, external_scripts: List[str]) -> PrivacyDat
 
     return privacy
 
-def _extract_external_scripts(html_content: str, hostname: str) -> List[str]:
+def _extract_external_scripts(html_content: str, hostname: str) -> list[str]:
     """Extrae scripts externos del HTML."""
     soup = BeautifulSoup(html_content, "html.parser")
     scripts = soup.find_all("script", src=True)
 
-    external_scripts: Set[str] = set()
+    external_scripts: set[str] = set()
     hostname_lower = hostname.lower()
 
     for script in scripts:
@@ -191,14 +188,14 @@ class TechScanner:
     @staticmethod
     def _cpu_bound_analysis(
         html_content: str,
-        response_headers: Dict[str, str],
-        cookies_dict: Dict[str, str],
+        response_headers: dict[str, str],
+        cookies_dict: dict[str, str],
         hostname: str
-    ) -> Tuple[List[str], List[str], PrivacyData]:
+    ) -> tuple[list[str], list[str], PrivacyData]:
         """Análisis CPU-intensivo ejecutado en thread."""
         html_lower = html_content.lower()
         external_scripts = _extract_external_scripts(html_content, hostname)
-        technologies: List[str] = []
+        technologies: list[str] = []
         privacy = _analyze_privacy(html_lower, external_scripts)
 
         return external_scripts, technologies, privacy
@@ -211,7 +208,7 @@ class TechScanner:
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
 
-        if not await is_safe_url(url):
+        if not await _is_safe_url_async(url):
             logger.warning(f"Intento de SSRF bloqueado: {url}")
             return result
 
@@ -219,7 +216,7 @@ class TechScanner:
         try:
             async with httpx.AsyncClient(verify=True, follow_redirects=False, timeout=HTTP_TIMEOUT, headers=req_headers) as client:
                 current_url = url
-                redirect_chain: List[str] = [current_url]
+                redirect_chain: list[str] = [current_url]
                 max_redirects = 10
                 redirect_count = 0
 
@@ -244,10 +241,12 @@ class TechScanner:
 
                         if response.status_code in (301, 302, 303, 307, 308):
                             location = response.headers.get("location")
-                            if not location: break
+                            if not location:
+                                break
                             from urllib.parse import urljoin
                             next_url = urljoin(current_url, location)
-                            if not await is_safe_url(next_url): break
+                            if not await _is_safe_url_async(next_url):
+                                break
                             redirect_chain.append(next_url)
                             current_url = next_url
                             redirect_count += 1
@@ -279,4 +278,4 @@ class TechScanner:
         except Exception as exc:
             logger.error(f"Error en análisis CPU-bound: {exc}")
 
-        return result
+        return result

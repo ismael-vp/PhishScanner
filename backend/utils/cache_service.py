@@ -7,7 +7,7 @@ import sqlite3
 import time
 import redis
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,12 @@ REDIS_URL = os.getenv("REDIS_URL", "").strip()
 def _safe_json_dumps(obj: Any) -> str:
     """Serializa a JSON de forma segura, manejando Pydantic y datetime."""
     def _default_serializer(o):
-        if hasattr(o, "model_dump"): return o.model_dump()
-        if hasattr(o, "dict"): return o.dict()
-        if hasattr(o, "isoformat"): return o.isoformat()
+        if hasattr(o, "model_dump"):
+            return o.model_dump()
+        if hasattr(o, "dict"):
+            return o.dict()
+        if hasattr(o, "isoformat"):
+            return o.isoformat()
         return str(o)
     return json.dumps(obj, default=_default_serializer, ensure_ascii=False)
 
@@ -58,7 +61,7 @@ def _validate_cache_type(cache_type: str) -> str:
         raise ValueError("Tipo de caché contiene caracteres inválidos")
     return cache_type
 
-def _get_db_path(db_path: Optional[str] = None) -> str:
+def _get_db_path(db_path: str | None = None) -> str:
     """Retorna la ruta segura de la base de datos."""
     if db_path:
         basename = os.path.basename(db_path)
@@ -71,7 +74,8 @@ def _get_db_path(db_path: Optional[str] = None) -> str:
     if DEFAULT_DB_DIR:
         base_dir = os.path.abspath(DEFAULT_DB_DIR)
     else:
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        docker_data_dir = "/app/data"
+        base_dir = docker_data_dir if os.path.isdir(docker_data_dir) else os.getcwd()
 
     os.makedirs(base_dir, exist_ok=True)
     return os.path.join(base_dir, filename)
@@ -79,7 +83,7 @@ def _get_db_path(db_path: Optional[str] = None) -> str:
 class CacheService:
     """Servicio de caché persistente basado en SQLite."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         self.use_redis = False
         self.redis_client = None
         self._local_rl_store = {}
@@ -210,7 +214,7 @@ class CacheService:
         self._local_rl_store[client_ip] = window
         return True
 
-    def get(self, key: str, cache_type: str, ttl_hours: Optional[int] = None) -> Optional[dict]:
+    def get(self, key: str, cache_type: str, ttl_hours: int | None = None) -> dict | None:
         """Recupera un valor del caché si no ha expirado."""
         try:
             key = _validate_key(key)
@@ -244,7 +248,8 @@ class CacheService:
                     (key, cache_type)
                 )
                 row = cursor.fetchone()
-                if not row: return None
+                if not row:
+                    return None
 
                 data_blob, timestamp_str, compressed = row
                 if datetime.now() - datetime.fromisoformat(timestamp_str) >= timedelta(hours=ttl):
@@ -311,9 +316,12 @@ class CacheService:
                     data_str = _safe_json_dumps(data)
                     data_bytes = data_str.encode("utf-8")
                     original_size = len(data_bytes)
-                    if original_size > MAX_DATA_SIZE_BYTES: return
-                except Exception: return
-            else: return
+                    if original_size > MAX_DATA_SIZE_BYTES:
+                        return
+                except Exception:
+                    return
+            else:
+                return
 
         compressed = 0
         if COMPRESSION_ENABLED and original_size > COMPRESSION_THRESHOLD:
@@ -327,8 +335,8 @@ class CacheService:
         def _do_set():
             with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 conn.execute(
-                    """INSERT OR REPLACE INTO scan_cache 
-                       (key, data, type, timestamp, compressed, size_bytes) 
+                    """INSERT OR REPLACE INTO scan_cache
+                       (key, data, type, timestamp, compressed, size_bytes)
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (key, data_bytes, cache_type, timestamp, compressed, original_size)
                 )
@@ -345,7 +353,7 @@ class CacheService:
         try:
             key = _validate_key(key)
             cache_type = _validate_cache_type(cache_type)
-        except ValueError as exc:
+        except ValueError:
             return
 
         if self.use_redis and self.redis_client:
@@ -362,7 +370,7 @@ class CacheService:
                 conn.commit()
         self._with_retry(_do_delete)
 
-    def clear_all(self, admin_key: Optional[str] = None) -> bool:
+    def clear_all(self, admin_key: str | None = None) -> bool:
         """Borra absolutamente toda la caché."""
         if self.use_redis and self.redis_client:
             try:
@@ -378,14 +386,17 @@ class CacheService:
                 cursor = conn.execute("DELETE FROM scan_cache")
                 deleted = cursor.rowcount
                 conn.commit()
-                try: conn.execute("VACUUM")
-                except sqlite3.OperationalError: pass
+                try:
+                    conn.execute("VACUUM")
+                except sqlite3.OperationalError:
+                    pass
                 return deleted
         try:
             deleted = self._with_retry(_do_clear)
             logger.info(f"Caché completamente eliminada ({deleted} registros)")
             return True
-        except Exception: return False
+        except Exception:
+            return False
 
     @staticmethod
     def _truncate_large_fields(data: dict, max_field_size: int = 5000) -> dict:

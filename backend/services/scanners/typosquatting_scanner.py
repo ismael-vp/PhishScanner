@@ -1,45 +1,44 @@
 import asyncio
 import functools
+import ipaddress
 import logging
-import re
-from typing import Optional, List, Set, Tuple
 
 import tldextract
 
 from models.osint_models import TyposquattingData
-from services.utils import TARGET_BRANDS
+from services.utils import TARGET_BRANDS, levenshtein_similarity
 
 logger = logging.getLogger(__name__)
 
 MAX_HOSTNAME_LENGTH = 253
 MIN_DOMAIN_LENGTH = 3
 
-HOMOGLYPHS: dict[str, Set[str]] = {
-    "a": {"а", "ạ", "ą", "ä", "à", "á"},
-    "b": {"Ь", "в"},
-    "c": {"с", "ϲ", "ċ"},
-    "d": {"ԁ", "đ"},
-    "e": {"е", "ẹ", "ė", "ĕ"},
-    "g": {"ɡ", "ģ"},
-    "h": {"һ", "հ"},
-    "i": {"і", "ị", "į", "ï", "ì", "í"},
-    "j": {"ј", "ʝ"},
+HOMOGLYPHS: dict[str, set[str]] = {
+    "a": {"а", "ạ", "ą", "ä", "à", "á"},  # noqa: RUF001
+    "b": {"Ь", "в"},  # noqa: RUF001
+    "c": {"с", "ϲ", "ċ"},  # noqa: RUF001
+    "d": {"ԁ", "đ"},  # noqa: RUF001
+    "e": {"е", "ẹ", "ė", "ĕ"},  # noqa: RUF001
+    "g": {"ɡ", "ģ"},  # noqa: RUF001
+    "h": {"һ", "հ"},  # noqa: RUF001
+    "i": {"і", "ị", "į", "ï", "ì", "í"},  # noqa: RUF001
+    "j": {"ј", "ʝ"},  # noqa: RUF001
     "k": {"κ", "к"},
-    "l": {"ӏ", "ḷ", "ł"},
+    "l": {"ӏ", "ḷ", "ł"},  # noqa: RUF001
     "m": {"м", "ṃ"},
-    "n": {"ո", "ṅ", "ņ"},
-    "o": {"о", "ο", "ọ", "ӧ", "ò", "ó"},
-    "p": {"р", "ρ", "ṗ"},
-    "q": {"ԛ"},
-    "r": {"г", "ṛ"},
-    "s": {"ѕ", "ṡ", "ş"},
+    "n": {"ո", "ṅ", "ņ"},  # noqa: RUF001
+    "o": {"о", "ο", "ọ", "ӧ", "ò", "ó"},  # noqa: RUF001
+    "p": {"р", "ρ", "ṗ"},  # noqa: RUF001
+    "q": {"ԛ"},  # noqa: RUF001
+    "r": {"г", "ṛ"},  # noqa: RUF001
+    "s": {"ѕ", "ṡ", "ş"},  # noqa: RUF001
     "t": {"т", "ṭ"},
-    "u": {"υ", "ս", "ü", "ù", "ú"},
-    "v": {"ν", "ṽ"},
-    "w": {"ԝ", "ẉ"},
-    "x": {"х", "ҳ"},
-    "y": {"у", "ý", "ÿ"},
-    "z": {"ᴢ", "ż"},
+    "u": {"υ", "ս", "ü", "ù", "ú"},  # noqa: RUF001
+    "v": {"ν", "ṽ"},  # noqa: RUF001
+    "w": {"ԝ", "ẉ"},  # noqa: RUF001
+    "x": {"х", "ҳ"},  # noqa: RUF001
+    "y": {"у", "ý", "ÿ"},  # noqa: RUF001
+    "z": {"ᴢ", "ż"},  # noqa: RUF001
 }
 
 _HOMOGLYPH_REVERSE: dict[str, str] = {}
@@ -57,37 +56,10 @@ SUSPICIOUS_SUFFIXES = {
     "-support", "-help", "-service",
 }
 
-@functools.lru_cache(maxsize=10000)
-def _levenshtein_distance(s1: str, s2: str) -> int:
-    """Calcula la distancia de Levenshtein entre dos strings."""
-    if len(s1) < len(s2):
-        return _levenshtein_distance(s2, s1)
-    if len(s2) == 0:
-        return len(s1)
+# levenshtein_distance y levenshtein_similarity importadas desde services.utils
+# (eliminada la copia local que causaba doble caché y trabajo duplicado)
 
-    previous_row = list(range(len(s2) + 1))
-    for i, c1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-
-    return previous_row[-1]
-
-def _levenshtein_similarity(s1: str, s2: str) -> float:
-    """Retorna similarity 0.0-1.0 basado en distancia de Levenshtein."""
-    if not s1 and not s2:
-        return 1.0
-    max_len = max(len(s1), len(s2))
-    if max_len == 0:
-        return 1.0
-    distance = _levenshtein_distance(s1, s2)
-    return 1.0 - (distance / max_len)
-
-def _detect_homoglyphs(domain: str) -> Tuple[bool, Optional[str], float]:
+def _detect_homoglyphs(domain: str) -> tuple[bool, str | None, float]:
     """Detecta si el dominio usa caracteres homoglifos."""
     normalized = []
     has_homoglyph = False
@@ -105,13 +77,13 @@ def _detect_homoglyphs(domain: str) -> Tuple[bool, Optional[str], float]:
     for brand in TARGET_BRANDS:
         if normalized_domain == brand:
             return True, brand, 0.95
-        sim = _levenshtein_similarity(normalized_domain, brand)
+        sim = levenshtein_similarity(normalized_domain, brand)
         if sim >= 0.90:
             return True, brand, 0.90
 
     return False, None, 0.0
 
-def _detect_levenshtein_typos(domain: str) -> Tuple[bool, Optional[str], float]:
+def _detect_levenshtein_typos(domain: str) -> tuple[bool, str | None, float]:
     """Detecta typos basados en distancia de Levenshtein."""
     best_match = None
     best_confidence = 0.0
@@ -120,7 +92,7 @@ def _detect_levenshtein_typos(domain: str) -> Tuple[bool, Optional[str], float]:
         if domain == brand:
             continue
 
-        sim = _levenshtein_similarity(domain, brand)
+        sim = levenshtein_similarity(domain, brand)
         threshold = 0.85 if len(brand) >= 6 else 0.80
 
         if sim >= threshold and sim > best_confidence:
@@ -131,7 +103,7 @@ def _detect_levenshtein_typos(domain: str) -> Tuple[bool, Optional[str], float]:
         return True, best_match, best_confidence
     return False, None, 0.0
 
-def _detect_bitsquatting(domain: str) -> Tuple[bool, Optional[str], float]:
+def _detect_bitsquatting(domain: str) -> tuple[bool, str | None, float]:
     """Detecta bitsquatting: un solo bit flip."""
     for brand in TARGET_BRANDS:
         if len(domain) != len(brand):
@@ -140,7 +112,7 @@ def _detect_bitsquatting(domain: str) -> Tuple[bool, Optional[str], float]:
             continue
 
         diff_count = 0
-        for c1, c2 in zip(domain, brand):
+        for c1, c2 in zip(domain, brand, strict=False):
             if c1 != c2:
                 diff_count += 1
                 xor = ord(c1) ^ ord(c2)
@@ -153,7 +125,7 @@ def _detect_bitsquatting(domain: str) -> Tuple[bool, Optional[str], float]:
 
     return False, None, 0.0
 
-def _detect_prefix_suffix(domain: str) -> Tuple[bool, Optional[str], float]:
+def _detect_prefix_suffix(domain: str) -> tuple[bool, str | None, float]:
     """Detecta si el dominio es una marca conocida con prefijo/sufijo sospechoso."""
     for brand in TARGET_BRANDS:
         if domain == brand:
@@ -177,7 +149,7 @@ def _detect_prefix_suffix(domain: str) -> Tuple[bool, Optional[str], float]:
 
     return False, None, 0.0
 
-def _detect_tld_swap(domain: str, original_tld: str) -> Tuple[bool, Optional[str], float]:
+def _detect_tld_swap(domain: str, original_tld: str) -> tuple[bool, str | None, float]:
     """Detecta cambio de TLD sospechoso."""
     common_tlds = {"com", "net", "org", "io", "app"}
     if original_tld in common_tlds:
@@ -198,28 +170,28 @@ def _validate_hostname(hostname: str) -> str:
         raise ValueError("Hostname vacío")
     if len(hostname) > MAX_HOSTNAME_LENGTH:
         raise ValueError(f"Hostname demasiado largo: {len(hostname)}")
-    import ipaddress
+    # Fix: separar la detección de IP del except genérico para no silenciar
+    # la excepción "No se aceptan IPs" con el mismo bloque.
     try:
         ipaddress.ip_address(hostname)
-        raise ValueError("No se aceptan IPs")
+        is_ip = True
     except ValueError:
-        pass
+        is_ip = False
+    if is_ip:
+        raise ValueError(f"No se aceptan IPs en typosquatting: {hostname}")
     return hostname
 
 class TyposquattingScanner:
     """Escáner de typosquatting con múltiples heurísticas."""
 
-    _cache: dict[str, Optional[TyposquattingData]] = {}
-    _cache_max_size = 1000
-
     @staticmethod
-    def _extract_root_domain(hostname: str) -> Tuple[str, str]:
+    def _extract_root_domain(hostname: str) -> tuple[str, str]:
         """Extrae el nombre de dominio raíz y el TLD."""
         extracted = tldextract.extract(hostname)
         return extracted.domain, extracted.suffix
 
     @staticmethod
-    async def check_typosquatting(hostname: str) -> Optional[TyposquattingData]:
+    async def check_typosquatting(hostname: str) -> TyposquattingData | None:
         """Analiza un hostname en busca de typosquatting."""
         try:
             hostname = _validate_hostname(hostname)
@@ -227,10 +199,9 @@ class TyposquattingScanner:
             logger.warning(f"Validación rechazada: {exc}")
             return None
 
-        if hostname in TyposquattingScanner._cache:
-            return TyposquattingScanner._cache[hostname]
-
         try:
+            # _check_typosquatting_sync tiene lru_cache → caché thread-safe
+            # sin race conditions ni memory leak por dict de clase compartido.
             result = await asyncio.to_thread(
                 TyposquattingScanner._check_typosquatting_sync,
                 hostname
@@ -239,17 +210,12 @@ class TyposquattingScanner:
             logger.error(f"Error en TyposquattingScanner: {exc}")
             result = None
 
-        if len(TyposquattingScanner._cache) >= TyposquattingScanner._cache_max_size:
-            keys_to_remove = list(TyposquattingScanner._cache.keys())[:TyposquattingScanner._cache_max_size // 2]
-            for k in keys_to_remove:
-                del TyposquattingScanner._cache[k]
-
-        TyposquattingScanner._cache[hostname] = result
         return result
 
     @staticmethod
-    def _check_typosquatting_sync(hostname: str) -> Optional[TyposquattingData]:
-        """Versión síncrona del análisis."""
+    @functools.lru_cache(maxsize=2000)
+    def _check_typosquatting_sync(hostname: str) -> TyposquattingData | None:
+        """Versión síncrona del análisis (cacheada via lru_cache, thread-safe)."""
         main_domain, tld = TyposquattingScanner._extract_root_domain(hostname)
 
         if len(main_domain) < MIN_DOMAIN_LENGTH:
@@ -274,4 +240,4 @@ class TyposquattingScanner:
                     technique=technique,
                 )
 
-        return None
+        return None

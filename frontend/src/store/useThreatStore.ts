@@ -51,15 +51,23 @@ export const useThreatStore = create<ThreatState>()(
 
           const validatedData = validation.success ? validation.data : result;
 
+          // Bug #4 fix: normalizar resourceName antes del deduplicado
+          const normalizedName = resourceName
+            || validatedData.resourceName
+            || (validatedData.type === 'url' ? 'URL Desconocida' : 'Archivo Analizado');
+
           // Enriquecemos el resultado con nombre y fecha para el historial
           const enrichedResult: ScanResult = {
             ...validatedData,
-            resourceName: resourceName || (validatedData.type === 'url' ? 'URL Desconocida' : 'Archivo Analizado'),
+            resourceName: normalizedName,
             timestamp: new Date().toISOString()
           } as ScanResult;
 
           // Evitar duplicados consecutivos exactamente iguales y limitar a 10 escaneos
-          const newHistory = [enrichedResult, ...state.history.filter(h => h.resourceName !== enrichedResult.resourceName)].slice(0, 10);
+          const newHistory = [
+            enrichedResult,
+            ...state.history.filter(h => h.resourceName !== normalizedName)
+          ].slice(0, 10);
 
           return { 
             scanResult: enrichedResult, 

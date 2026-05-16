@@ -47,6 +47,11 @@ next-env.d.ts
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
 
 # Databases
 *.db

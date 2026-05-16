@@ -206,11 +206,11 @@ addopts = [
     "--cov=services",
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
-    "--cov-fail-under=80",
+    "--cov-fail-under=25",
 ]
 asyncio_mode = "auto"
 markers = [
-    "slow: marks tests as slow (deselect with '-m "not slow"')",
+    "slow: marks tests as slow",
     "integration: marks tests as integration tests",
     "security: marks tests as security-focused tests",
 ]

@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import HTTPException
 from openai import AsyncOpenAI
@@ -23,6 +23,12 @@ MAX_MESSAGES_COUNT = int(os.getenv("AI_MAX_MESSAGES_COUNT", "20"))
 MAX_MESSAGE_LENGTH = int(os.getenv("AI_MAX_MESSAGE_LENGTH", "2000"))
 MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "3"))
 RETRY_BASE_DELAY = float(os.getenv("AI_RETRY_BASE_DELAY", "1.0"))
+
+# response_format=json_object solo lo soporta la API oficial de OpenAI.
+# ChatAnywhere y otros proxies lo rechazan con 400.
+_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").lower()
+_SUPPORTS_JSON_MODE = "openai.com" in _base_url
+_JSON_RESPONSE_FORMAT: dict = {"type": "json_object"} if _SUPPORTS_JSON_MODE else {}
 
 PROMPT_INJECTION_PATTERNS = [
     re.compile(r"ignore\s+(all\s+)?(previous\s+)?instructions?", re.I),
@@ -51,7 +57,7 @@ SENSITIVE_CONTEXT_FIELDS = {
 class AnalysisResponse(BaseModel):
     """Schema esperado de la respuesta JSON de generate_analysis_explanation."""
     summary: str = Field(..., min_length=10, max_length=500)
-    action_steps: List[str] = Field(default_factory=list, max_length=5)
+    action_steps: list[str] = Field(default_factory=list, max_length=5)
 
 def _sanitize_untrusted_text(text: str) -> str:
     """Sanitiza texto no confiable antes de incluirlo en un prompt."""
@@ -86,7 +92,7 @@ def _safe_json_dumps(obj: Any, max_chars: int = MAX_CONTEXT_CHARS) -> str:
 
     return _truncate_text(json_str, max_chars)
 
-def _filter_sensitive_context(context: Dict[str, Any]) -> Dict[str, Any]:
+def _filter_sensitive_context(context: dict[str, Any]) -> dict[str, Any]:
     """Filtra campos sensibles del contexto."""
     if not isinstance(context, dict):
         return {}
@@ -113,7 +119,7 @@ def _filter_sensitive_context(context: Dict[str, Any]) -> Dict[str, Any]:
 
     return filtered
 
-def _validate_chat_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+def _validate_chat_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     """Valida y sanitiza los mensajes del chat."""
     if not isinstance(messages, list):
         raise ValueError("messages debe ser una lista")
@@ -156,6 +162,9 @@ async def _api_call_with_retry(callable, max_retries: int = MAX_RETRIES):
     for attempt in range(max_retries + 1):
         try:
             return await callable()
+        except HTTPException:
+            # Bug #5 fix: las HTTPException propias no deben entrar al retry
+            raise
         except Exception as exc:
             last_exception = exc
             error_str = str(exc).lower()
@@ -195,9 +204,16 @@ class AIService:
     """Servicio de Inteligencia Artificial para PhishingScanner."""
 
     def __init__(self):
-        self.client = get_openai_client()
-        if not self.client:
-            logger.error("Cliente de IA no inicializado.")
+        self._client: AsyncOpenAI | None = None
+
+    @property
+    def client(self) -> AsyncOpenAI | None:
+        """Lazy init: crea el cliente la primera vez que se necesita."""
+        if self._client is None:
+            self._client = get_openai_client()
+            if not self._client:
+                logger.error("Cliente de IA no inicializado.")
+        return self._client
 
     async def generate_analysis_explanation(self, vt_stats: dict, resource_type: str) -> dict:
         """Genera una explicación del análisis de VirusTotal usando IA."""
@@ -258,7 +274,7 @@ class AIService:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    response_format={"type": "json_object"},
+                    **({"response_format": _JSON_RESPONSE_FORMAT} if _JSON_RESPONSE_FORMAT else {}),
                     temperature=AI_TEMPERATURE,
                     max_tokens=AI_MAX_TOKENS_DEFAULT,
                 )
@@ -271,7 +287,15 @@ class AIService:
                     detail="La IA no generó una respuesta válida."
                 )
 
-            content = response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            # Fix Caos #5: content puede ser None si OpenAI activa filtros de contenido
+            if not content:
+                logger.warning("OpenAI devolvió content=None en generate_analysis_explanation")
+                raise HTTPException(
+                    status_code=502,
+                    detail="La IA no generó una respuesta. Intenta de nuevo."
+                )
+            content = content.strip()
             if not content:
                 raise HTTPException(
                     status_code=502,
@@ -301,7 +325,7 @@ class AIService:
                 detail="Error interno al generar el análisis con la IA."
             )
 
-    async def chat_with_context(self, messages: List[dict], scan_context: dict) -> str:
+    async def chat_with_context(self, messages: list[dict], scan_context: dict) -> str:
         """Responde preguntas del usuario basándose en el contexto del escaneo."""
         if not self.client:
             raise HTTPException(
@@ -329,7 +353,7 @@ class AIService:
             f"<untrusted_text>{context_str}</untrusted_text>"
         )
 
-        formatted_messages = [{"role": "system", "content": system_prompt}] + safe_messages
+        formatted_messages = [{"role": "system", "content": system_prompt}, *safe_messages]
 
         try:
             response = await _api_call_with_retry(
@@ -347,7 +371,12 @@ class AIService:
                     detail="La IA no generó una respuesta."
                 )
 
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            # Fix Caos #5: content puede ser None si OpenAI activa filtros
+            if not content:
+                logger.warning("OpenAI devolvió content=None en chat_with_context")
+                raise HTTPException(status_code=502, detail="La IA no generó respuesta.")
+            return content.strip()
 
         except HTTPException:
             raise
@@ -399,7 +428,12 @@ class AIService:
                     detail="La IA no generó una explicación."
                 )
 
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            # Fix Caos #5: content puede ser None si OpenAI activa filtros
+            if not content:
+                logger.warning("OpenAI devolvió content=None en explain_script")
+                raise HTTPException(status_code=502, detail="La IA no generó explicación.")
+            return content.strip()
 
         except HTTPException:
             raise
@@ -408,4 +442,4 @@ class AIService:
             raise HTTPException(
                 status_code=500,
                 detail="Error interno al analizar el script con la IA."
-            )
+            )

@@ -2,8 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from typing import Optional, Set
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -42,6 +41,11 @@ def _get_webhook_patterns() -> list:
 WEBHOOK_PATTERNS = _get_webhook_patterns()
 DANGEROUS_SCHEMES = {"javascript:", "data:", "vbscript:", "file:", "about:"}
 
+# Compiladas a nivel de módulo para no recompilar en cada petición
+_RE_PASSWORD_NAME = re.compile(r"password|passwd|pass|pwd|cc_number|cvv|ssn", re.I)
+_RE_PASSWORD_ID   = re.compile(r"password|passwd|pass|pwd", re.I)
+_RE_SENSITIVE_NAME = re.compile(r"email|user|login|username|account|phone|card", re.I)
+
 def _normalize_netloc(netloc: str) -> str:
     """Normaliza netloc removiendo puerto default."""
     if netloc.endswith(":80"):
@@ -67,7 +71,7 @@ def _is_external_action(action: str, page_hostname: str) -> bool:
 
     return False
 
-def _has_dangerous_scheme(action: str) -> Optional[str]:
+def _has_dangerous_scheme(action: str) -> str | None:
     """Detecta si el action usa un esquema peligroso."""
     if not action:
         return None
@@ -91,7 +95,7 @@ class FormScanner:
     async def analyze_forms(
         html_content: str,
         hostname: str,
-        url_anatomy: Optional[UrlAnatomyData] = None
+        url_anatomy: UrlAnatomyData | None = None
     ) -> FormData:
         """Analiza formularios HTML en busca de indicadores de phishing."""
         result = FormData()
@@ -128,7 +132,7 @@ class FormScanner:
     def _analyze_forms_sync(
         html_content: str,
         hostname: str,
-        url_anatomy: Optional[UrlAnatomyData] = None
+        url_anatomy: "UrlAnatomyData | None" = None
     ) -> FormData:
         """Versión síncrona del análisis."""
         result = FormData()
@@ -136,13 +140,19 @@ class FormScanner:
 
         is_high_risk_domain = False
         if url_anatomy is not None:
-            is_high_risk_domain = bool(
-                url_anatomy.suspicious_tld
-                or url_anatomy.is_dga_suspect
-                or url_anatomy.excessive_hyphens
-                or url_anatomy.excessive_subdomains
+            # Soporta tanto UrlAnatomyData como URLStructureResult (risk_score siempre existe)
+            risk_score = getattr(url_anatomy, "risk_score", 0)
+            is_high_risk_domain = (
+                risk_score >= 50
+                or getattr(url_anatomy, "suspicious_tld", False)
+                or getattr(url_anatomy, "is_dga_suspect", False)
+                or getattr(url_anatomy, "excessive_hyphens", False)
+                or getattr(url_anatomy, "excessive_subdomains", False)
             )
 
+        # ── inicializar fuera del loop: necesarios para el check de iframes ──
+        has_password = False
+        has_sensitive = False
         forms = soup.find_all("form")
         for form in forms:
             action = form.get("action", "") or ""
@@ -163,13 +173,13 @@ class FormScanner:
 
             has_password = bool(
                 form.find("input", type="password")
-                or form.find("input", {"name": re.compile(r"password|passwd|pass|pwd|cc_number|cvv|ssn", re.I)})
-                or form.find("input", {"id": re.compile(r"password|passwd|pass|pwd", re.I)})
+                or form.find("input", {"name": _RE_PASSWORD_NAME})
+                or form.find("input", {"id": _RE_PASSWORD_ID})
             )
 
             has_sensitive = bool(
                 form.find("input", type="email")
-                or form.find("input", {"name": re.compile(r"email|user|login|username|account|phone|card", re.I)})
+                or form.find("input", {"name": _RE_SENSITIVE_NAME})
             )
 
             if has_password or has_sensitive:

@@ -1,11 +1,9 @@
 import asyncio
 import base64
-import hashlib
 import logging
 import os
 import re
 import time
-from typing import Dict, List, Optional
 
 import httpx
 from fastapi import HTTPException
@@ -29,7 +27,7 @@ VT_RATE_LIMIT_WINDOW = int(os.getenv("VT_RATE_LIMIT_WINDOW", "60"))
 # RATE LIMITING POR TOKEN/IP (memoria local; usar Redis en multi-worker)
 # =============================================================================
 
-_vt_rate_limit_store: Dict[str, List[float]] = {}
+_vt_rate_limit_store: dict[str, list[float]] = {}
 
 
 def _check_vt_rate_limit(identifier: str) -> bool:
@@ -92,7 +90,7 @@ class VirusTotalService:
     y fugas de información.
     """
 
-    _client: Optional[httpx.AsyncClient] = None
+    _client: httpx.AsyncClient | None = None
 
     def __init__(self):
         self.api_key = os.getenv("VT_API_KEY", "").strip()
@@ -273,7 +271,24 @@ class VirusTotalService:
                     detail="El análisis de VirusTotal no se completó a tiempo."
                 )
 
-            data = await self._make_request("GET", endpoint)
+            # Fix Caos #6: Evitar _make_request en polling para no consumir rate limit global (memoria)
+            client = self._get_client()
+            url = f"{VT_API_URL}{endpoint}"
+            try:
+                response = await client.request("GET", url, headers=self.headers)
+            except httpx.TimeoutException:
+                raise HTTPException(status_code=504, detail="VT polling timeout.")
+            except httpx.NetworkError:
+                raise HTTPException(status_code=502, detail="Error de red en VT polling.")
+
+            if response.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"VT error en polling: {response.status_code}")
+
+            try:
+                data = response.json()
+            except Exception:
+                raise HTTPException(status_code=502, detail="Respuesta no JSON en polling VT.")
+
             status = data.get("data", {}).get("attributes", {}).get("status", "queued")
 
             if status == "completed":

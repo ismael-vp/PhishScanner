@@ -2,12 +2,10 @@ import asyncio
 import ipaddress
 import logging
 import os
-from typing import Optional
 
 import httpx
 
-from models.osint_models import GeoScannerResult, GeolocationData
-from services.utils import is_safe_url
+from models.osint_models import GeolocationData, GeoScannerResult
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +19,7 @@ USER_AGENT = os.getenv(
 class GeoScanner:
     """Escáner de geolocalización y reputación IP."""
 
-    _client: Optional[httpx.AsyncClient] = None
+    _client: httpx.AsyncClient | None = None
 
     @classmethod
     def _get_client(cls) -> httpx.AsyncClient:
@@ -69,7 +67,7 @@ class GeoScanner:
         method: str,
         url: str,
         **kwargs
-    ) -> Optional[httpx.Response]:
+    ) -> httpx.Response | None:
         """Realiza una petición HTTP con reintentos."""
         for attempt in range(MAX_RETRIES + 1):
             try:
@@ -90,7 +88,7 @@ class GeoScanner:
                     await asyncio.sleep(1.0)
                     continue
                 return None
-            except httpx.NetworkError as exc:
+            except httpx.NetworkError:
                 logger.warning(f"Error de red en {url} (intento {attempt + 1})")
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(1.0)
@@ -118,7 +116,7 @@ class GeoScanner:
         try:
             from urllib.parse import quote
             safe_ip = quote(validated_ip, safe="")
-            url = f"http://ip-api.com/json/{safe_ip}"
+            url = f"https://ip-api.com/json/{safe_ip}"
 
             response = await GeoScanner._fetch_with_retry(client, "GET", url)
 

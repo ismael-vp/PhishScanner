@@ -1,0 +1,34 @@
+# Ruff — linter y formatter para Python
+# Documentación: https://docs.astral.sh/ruff/
+
+target-version = "py310"
+line-length = 100
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes (imports no usados, variables no definidas)
+    "I",   # isort (orden de imports)
+    "B",   # flake8-bugbear (bugs comunes)
+    "UP",  # pyupgrade (sintaxis moderna de Python)
+    "S",   # flake8-bandit (seguridad básica)
+    "RUF", # reglas propias de Ruff
+]
+
+ignore = [
+    "S101",  # uso de assert (válido en tests)
+    "S311",  # random no-criptográfico
+    "E501",  # líneas largas (controlado por line-length)
+    "B904",  # raise within except
+]
+
+exclude = [
+    ".venv",
+    "__pycache__",
+    "*.pyc",
+    "migrations",
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]
