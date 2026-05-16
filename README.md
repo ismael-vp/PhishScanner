@@ -16,7 +16,7 @@ La vía recomendada para evitar conflictos de dependencias y aislar la red es us
 
 **1. Clonar y configurar:**
 ```bash
-git clone [https://github.com/tu-usuario/PhishingScanner.git](https://github.com/tu-usuario/PhishingScanner.git)
+git clone https://github.com/ismael-vp/PhishingScanner.git
 cd PhishingScanner
 ```
 
