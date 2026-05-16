@@ -39,8 +39,6 @@ IMAGE_ALLOWED_TYPES = {
     "image/gif", "image/bmp", "image/tiff"
 }
 
-_rate_limit_store: Dict[str, List[float]] = {}
-
 def get_client_ip(request: Request) -> str:
     """Extrae la IP real del cliente respetando headers de proxy."""
     x_forwarded_for = request.headers.get("X-Forwarded-For")
@@ -51,16 +49,8 @@ def get_client_ip(request: Request) -> str:
     return "unknown"
 
 def check_rate_limit(client_ip: str) -> bool:
-    """Retorna True si la solicitud está dentro del límite permitido."""
-    now = time.time()
-    window = _rate_limit_store.get(client_ip, [])
-    window = [t for t in window if now - t < RATE_LIMIT_WINDOW]
-    if len(window) >= RATE_LIMIT_REQUESTS:
-        _rate_limit_store[client_ip] = window
-        return False
-    window.append(now)
-    _rate_limit_store[client_ip] = window
-    return True
+    """Retorna True si la solicitud está dentro del límite permitido (vía Redis o Local)."""
+    return cache_service.check_rate_limit(client_ip, RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW)
 
 async def rate_limit_dependency(request: Request):
     client_ip = get_client_ip(request)
@@ -176,8 +166,29 @@ async def analyze_url(request: URLRequest = Body(...)):
         if cached_result:
             return cached_result
 
-        vt_stats = await vt_service.get_url_report(request.url)
-        osint_data = await OSINTService.get_osint_data(request.url)
+        # Ejecución en paralelo (Concurrencia) para reducir el tiempo a la mitad.
+        # Además, añadimos tolerancia a fallos: si VirusTotal se cae o excede el límite de cuota,
+        # la plataforma NO debe romperse; pasaremos a depender de nuestra Heurística y OSINT.
+        import asyncio
+        results = await asyncio.gather(
+            vt_service.get_url_report(request.url),
+            OSINTService.get_osint_data(request.url),
+            return_exceptions=True
+        )
+        
+        vt_result, osint_result = results
+
+        if isinstance(vt_result, Exception):
+            logger.warning(f"VirusTotal falló. Activando contingencia heurística. Error: {vt_result}")
+            vt_stats = {"malicious": 0, "suspicious": 0, "error": str(vt_result)}
+        else:
+            vt_stats = vt_result
+
+        if isinstance(osint_result, Exception):
+            logger.error(f"OSINT falló críticamente: {osint_result}")
+            osint_data = None
+        else:
+            osint_data = osint_result
 
         # Heurística de Respaldo
         if vt_stats.get("malicious", 0) == 0 and vt_stats.get("suspicious", 0) == 0:

@@ -64,7 +64,7 @@ export default function SecurityVerdict({ scanResult }: SecurityVerdictProps) {
         <div className="flex flex-col">
           <div className="flex items-center space-x-3">
             <h2 className="text-2xl font-bold text-white tracking-tight">
-              {isCritical ? 'Riesgo Crítico' : isDangerous ? 'Riesgo Detectado' : 'Sitio Seguro'}
+              {isCritical ? 'Sitio Inseguro' : isDangerous ? 'Riesgo Detectado' : 'Sitio Seguro'}
             </h2>
             <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase tracking-widest ${
               isCritical ? 'text-red-500 border-red-500/20 bg-red-500/10' : 

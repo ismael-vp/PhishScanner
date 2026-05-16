@@ -88,8 +88,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization", "X-Admin-Key", "X-Requested-With"],
+    allow_methods=["*"],
+    allow_headers=["*"],
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining"],
     max_age=600,
 )

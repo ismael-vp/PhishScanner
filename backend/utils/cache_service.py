@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import time
+import redis
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -22,6 +23,7 @@ MAX_DB_SIZE_MB = int(os.getenv("CACHE_MAX_DB_SIZE_MB", "500"))
 CLEANUP_INTERVAL_HOURS = int(os.getenv("CACHE_CLEANUP_INTERVAL_HOURS", "6"))
 DB_LOCK_RETRY_ATTEMPTS = int(os.getenv("CACHE_DB_LOCK_RETRY_ATTEMPTS", "3"))
 DB_LOCK_RETRY_DELAY = float(os.getenv("CACHE_DB_LOCK_RETRY_DELAY", "0.1"))
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
 def _safe_json_dumps(obj: Any) -> str:
     """Serializa a JSON de forma segura, manejando Pydantic y datetime."""
@@ -78,10 +80,26 @@ class CacheService:
     """Servicio de caché persistente basado en SQLite."""
 
     def __init__(self, db_path: Optional[str] = None):
-        self.db_path = _get_db_path(db_path)
-        self._last_cleanup = 0.0
-        self._cleanup_interval_seconds = CLEANUP_INTERVAL_HOURS * 3600
-        self._init_db()
+        self.use_redis = False
+        self.redis_client = None
+        self._local_rl_store = {}
+        
+        if REDIS_URL:
+            try:
+                # Usar Redis si REDIS_URL está presente
+                self.redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=False)
+                self.redis_client.ping()
+                self.use_redis = True
+                logger.info("✅ Conectado a Redis para caché y rate limit")
+            except Exception as e:
+                logger.error(f"❌ Fallo al conectar a Redis: {e}. Usando SQLite local.")
+                self.use_redis = False
+                
+        if not self.use_redis:
+            self.db_path = _get_db_path(db_path)
+            self._last_cleanup = 0.0
+            self._cleanup_interval_seconds = CLEANUP_INTERVAL_HOURS * 3600
+            self._init_db()
 
     def _init_db(self):
         """Inicializa la base de datos con WAL mode e índices."""
@@ -165,6 +183,33 @@ class CacheService:
         except OSError:
             return True
 
+    def check_rate_limit(self, client_ip: str, max_requests: int, window_seconds: int) -> bool:
+        """Verifica el límite de tasa usando Redis (si está activo) o memoria local."""
+        if self.use_redis and self.redis_client:
+            try:
+                redis_key = f"rate_limit:{client_ip}"
+                current = self.redis_client.incr(redis_key)
+                if current == 1:
+                    self.redis_client.expire(redis_key, window_seconds)
+                return current <= max_requests
+            except Exception as e:
+                logger.error(f"Error en Redis rate limit: {e}")
+                return True  # Fall open en caso de error
+
+        # Fallback a memoria local
+        now = time.time()
+        if len(self._local_rl_store) > 10000:
+            self._local_rl_store.clear()
+            
+        window = self._local_rl_store.get(client_ip, [])
+        window = [t for t in window if now - t < window_seconds]
+        if len(window) >= max_requests:
+            self._local_rl_store[client_ip] = window
+            return False
+        window.append(now)
+        self._local_rl_store[client_ip] = window
+        return True
+
     def get(self, key: str, cache_type: str, ttl_hours: Optional[int] = None) -> Optional[dict]:
         """Recupera un valor del caché si no ha expirado."""
         try:
@@ -175,6 +220,22 @@ class CacheService:
             return None
 
         ttl = ttl_hours if ttl_hours is not None else DEFAULT_TTL_HOURS
+
+        if self.use_redis and self.redis_client:
+            try:
+                redis_key = f"cache:{cache_type}:{key}"
+                data_blob = self.redis_client.get(redis_key)
+                if not data_blob:
+                    return None
+                
+                # Check for gzip magic bytes
+                if data_blob.startswith(b'\x1f\x8b'):
+                    data_blob = gzip.decompress(data_blob)
+                    
+                return json.loads(data_blob.decode("utf-8"))
+            except Exception as e:
+                logger.error(f"Error leyendo de Redis: {e}")
+                return None
 
         def _do_get():
             with sqlite3.connect(self.db_path, timeout=10.0) as conn:
@@ -212,6 +273,24 @@ class CacheService:
         except ValueError as exc:
             logger.warning(f"Validación de caché rechazada: {exc}")
             return
+
+        if self.use_redis and self.redis_client:
+            try:
+                data_str = _safe_json_dumps(data)
+                data_bytes = data_str.encode("utf-8")
+                
+                if COMPRESSION_ENABLED and len(data_bytes) > COMPRESSION_THRESHOLD:
+                    compressed_data = gzip.compress(data_bytes, compresslevel=6)
+                    if len(compressed_data) < len(data_bytes):
+                        data_bytes = compressed_data
+                        
+                redis_key = f"cache:{cache_type}:{key}"
+                ttl_seconds = DEFAULT_TTL_HOURS * 3600
+                self.redis_client.setex(redis_key, ttl_seconds, data_bytes)
+                return
+            except Exception as e:
+                logger.error(f"Error escribiendo en Redis: {e}")
+                return
 
         if not self._check_db_size():
             return
@@ -269,6 +348,14 @@ class CacheService:
         except ValueError as exc:
             return
 
+        if self.use_redis and self.redis_client:
+            try:
+                self.redis_client.delete(f"cache:{cache_type}:{key}")
+                return
+            except Exception as e:
+                logger.error(f"Error borrando de Redis: {e}")
+                return
+
         def _do_delete():
             with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 conn.execute("DELETE FROM scan_cache WHERE key = ? AND type = ?", (key, cache_type))
@@ -277,6 +364,15 @@ class CacheService:
 
     def clear_all(self, admin_key: Optional[str] = None) -> bool:
         """Borra absolutamente toda la caché."""
+        if self.use_redis and self.redis_client:
+            try:
+                self.redis_client.flushdb()
+                logger.info("Caché de Redis completamente eliminada")
+                return True
+            except Exception as e:
+                logger.error(f"Error limpiando Redis: {e}")
+                return False
+
         def _do_clear():
             with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute("DELETE FROM scan_cache")
