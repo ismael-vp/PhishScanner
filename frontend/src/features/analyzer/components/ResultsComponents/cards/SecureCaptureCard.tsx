@@ -21,14 +21,6 @@ export default function SecureCaptureCard({ osintData, safeUrl }: SecureCaptureC
   
   const currentImageUrl = activeView === 'desktop' ? desktopUrl : mobileUrl;
 
-  // Si cambiamos de vista, reiniciamos los estados si la nueva URL es distinta
-  React.useEffect(() => {
-    if (currentImageUrl) {
-      setIsLoading(true);
-      setHasError(false);
-    }
-  }, [activeView, currentImageUrl]);
-
   // Timeout de seguridad
   React.useEffect(() => {
     if (currentImageUrl) {
@@ -51,7 +43,15 @@ export default function SecureCaptureCard({ osintData, safeUrl }: SecureCaptureC
         {/* Toggle Desktop / Mobile */}
         <div className="flex items-center p-1 bg-zinc-900 border border-zinc-800 rounded-md">
           <button
-            onClick={() => setActiveView('desktop')}
+            onClick={() => {
+              if (activeView !== 'desktop') {
+                setActiveView('desktop');
+                if (desktopUrl) {
+                  setIsLoading(true);
+                  setHasError(false);
+                }
+              }
+            }}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all ${
               activeView === 'desktop'
                 ? 'bg-zinc-800 text-zinc-100 shadow-sm'
@@ -62,7 +62,15 @@ export default function SecureCaptureCard({ osintData, safeUrl }: SecureCaptureC
             <span>Desktop</span>
           </button>
           <button
-            onClick={() => setActiveView('mobile')}
+            onClick={() => {
+              if (activeView !== 'mobile') {
+                setActiveView('mobile');
+                if (mobileUrl) {
+                  setIsLoading(true);
+                  setHasError(false);
+                }
+              }
+            }}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all ${
               activeView === 'mobile'
                 ? 'bg-zinc-800 text-zinc-100 shadow-sm'

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight, Layers, Monitor, ExternalLink } from 'lucide-react';
+
 import { ScanResult } from '@/types';
 import UrlAnatomyCard from '@/features/analyzer/components/ResultsComponents/cards/UrlAnatomyCard';
 import HeuristicRiskCard from '@/features/analyzer/components/ResultsComponents/cards/HeuristicRiskCard';

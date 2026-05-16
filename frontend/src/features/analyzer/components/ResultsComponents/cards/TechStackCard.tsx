@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, ExternalLink, Code } from 'lucide-react';
+import { Shield, ExternalLink } from 'lucide-react';
 
 interface TechStackCardProps {
   technologies?: string[];
@@ -8,7 +8,8 @@ interface TechStackCardProps {
 }
 
 const TechStackCard: React.FC<TechStackCardProps> = ({ 
-  technologies = [], 
+  // technologies no se está usando, se puede omitir o prefijar con un guion bajo
+  technologies: _technologies = [], 
   externalScripts = [],
   onExplainScript 
 }) => {

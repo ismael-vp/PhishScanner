@@ -21,12 +21,14 @@ export default function AnalyzeForm() {
   // --- EFECTO: Gestor de Memoria para la previsualización de imágenes (Fix Blob Leak) ---
   useEffect(() => {
     if (!imageInput) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreviewUrl(null);
       return;
     }
 
     // Crea la URL temporal en la memoria del navegador
     const objectUrl = URL.createObjectURL(imageInput);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPreviewUrl(objectUrl);
 
     // CLEANUP FUNCTION: Se ejecuta cuando imageInput cambia o el componente se desmonta.

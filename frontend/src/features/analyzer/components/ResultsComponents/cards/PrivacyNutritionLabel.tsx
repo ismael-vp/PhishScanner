@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye, User, Camera, ShieldCheck } from 'lucide-react';
+import { Eye, User, Camera } from 'lucide-react';
 import { PrivacyData } from '@/types/osint';
 
 interface PrivacyNutritionLabelProps {

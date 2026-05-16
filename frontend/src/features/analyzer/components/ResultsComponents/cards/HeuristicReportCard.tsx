@@ -1,5 +1,5 @@
 import React from 'react';
-import { Fingerprint, ShieldAlert, Shield, ShieldCheck, Activity } from 'lucide-react';
+import { ShieldAlert, Shield, ShieldCheck, Activity } from 'lucide-react';
 
 import { HeuristicResult } from '@/types';
 
