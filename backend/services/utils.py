@@ -149,13 +149,18 @@ def is_safe_url(url: str) -> bool:
             pass  # no era IP → seguir con resolución DNS
 
         # ── Resolución DNS síncrona ───────────────────────────────────────
-        addr_info = socket.getaddrinfo(hostname, None)
-        for _, _, _, _, sockaddr in addr_info:
-            if _is_reserved_ip(sockaddr[0]):
-                # 🔒 No loggear la IP interna resuelta (fuga de info)
-                _h = hashlib.sha256(hostname.encode()).hexdigest()[:12]
-                logger.info(f"SSRF bloqueado: hostname_hash={_h}")
-                return False
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, family=socket.AF_INET)
+            for _, _, _, _, sockaddr in addr_info:
+                if _is_reserved_ip(sockaddr[0]):
+                    # 🔒 No loggear la IP interna resuelta (fuga de info)
+                    _h = hashlib.sha256(hostname.encode()).hexdigest()[:12]
+                    logger.info(f"SSRF bloqueado: hostname_hash={_h}")
+                    return False
+        except socket.gaierror as exc:
+            logger.warning(f"Error DNS (gaierror) resolviendo {hostname} síncrono: {exc}")
+        except Exception as exc:
+            logger.warning(f"Error inesperado DNS resolviendo {hostname} síncrono: {exc}")
         return True
     except Exception:
         return False
@@ -191,13 +196,18 @@ async def is_safe_url_async(url: str) -> bool:
             pass
 
         # ── Resolución DNS no bloqueante ──────────────────────────────────
-        loop = asyncio.get_event_loop()
-        addr_info = await loop.getaddrinfo(hostname, None)
-        for _, _, _, _, sockaddr in addr_info:
-            if _is_reserved_ip(sockaddr[0]):
-                _h = hashlib.sha256(hostname.encode()).hexdigest()[:12]
-                logger.info(f"SSRF bloqueado (async): hostname_hash={_h}")
-                return False
+        try:
+            loop = asyncio.get_event_loop()
+            addr_info = await loop.getaddrinfo(hostname, None, family=socket.AF_INET)
+            for _, _, _, _, sockaddr in addr_info:
+                if _is_reserved_ip(sockaddr[0]):
+                    _h = hashlib.sha256(hostname.encode()).hexdigest()[:12]
+                    logger.info(f"SSRF bloqueado (async): hostname_hash={_h}")
+                    return False
+        except socket.gaierror as exc:
+            logger.warning(f"Error DNS (gaierror) resolviendo {hostname} asíncrono: {exc}")
+        except Exception as exc:
+            logger.warning(f"Error inesperado DNS resolviendo {hostname} asíncrono: {exc}")
         return True
     except Exception:
         return False
@@ -302,7 +312,9 @@ async def resolve_redirect_chain(url: str, timeout: float = 8.0, max_redirects: 
             for _ in range(max_redirects):
                 try:
                     response = await client.head(current_url, timeout=timeout)
-                    if response.status_code in (405, 501, 400):
+                    # Si no es un código de éxito (200) o de redirección (3xx), reintentamos con GET (stream)
+                    # ya que muchos acortadores bloquean peticiones HEAD de datacenters con 403 o 405.
+                    if response.status_code not in (200, 301, 302, 303, 307, 308):
                         async with client.stream("GET", current_url, timeout=timeout) as resp:
                             status_code = resp.status_code
                             resp_headers = resp.headers
