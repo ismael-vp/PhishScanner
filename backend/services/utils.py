@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import filetype
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -278,4 +279,60 @@ def calculate_file_forensics(file_bytes: bytes, filename: str) -> dict[str, Any]
         "extension_alert": f"PELIGROSA: {dangerous_ext}" if is_dangerous else None,
         "entropy_alerts": entropy_alerts,
     }
+
+
+async def resolve_redirect_chain(url: str, timeout: float = 8.0, max_redirects: int = 10) -> list[str]:
+    """Sigue las redirecciones de una URL de forma segura y devuelve la cadena completa de URLs resueltas."""
+    if not url:
+        return []
+
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    if not await is_safe_url_async(url):
+        return [url]
+
+    redirect_chain = [url]
+    current_url = url
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+    try:
+        async with httpx.AsyncClient(verify=True, follow_redirects=False, timeout=timeout, headers=headers) as client:
+            for _ in range(max_redirects):
+                try:
+                    response = await client.head(current_url, timeout=timeout)
+                    if response.status_code in (405, 501, 400):
+                        async with client.stream("GET", current_url, timeout=timeout) as resp:
+                            status_code = resp.status_code
+                            resp_headers = resp.headers
+                    else:
+                        status_code = response.status_code
+                        resp_headers = response.headers
+                except Exception:
+                    async with client.stream("GET", current_url, timeout=timeout) as resp:
+                        status_code = resp.status_code
+                        resp_headers = resp.headers
+
+                if status_code in (301, 302, 303, 307, 308):
+                    location = resp_headers.get("location")
+                    if not location:
+                        break
+                    from urllib.parse import urljoin
+                    next_url = urljoin(current_url, location)
+                    if not await is_safe_url_async(next_url):
+                        break
+                    if next_url in redirect_chain:
+                        break
+                    redirect_chain.append(next_url)
+                    current_url = next_url
+                else:
+                    break
+    except Exception as exc:
+        logger.warning(f"Error al resolver redirecciones para {url}: {exc}")
+
+    if not redirect_chain:
+        redirect_chain = [url]
+
+    return redirect_chain
 

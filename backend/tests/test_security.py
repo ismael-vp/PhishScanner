@@ -146,3 +146,90 @@ class TestWhoisHostnameValidation:
 
     def test_normalizes_lowercase(self):
         assert self._validate("Google.COM") == "google.com"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# resolve_redirect_chain — resolución segura de redirecciones
+# ────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+class TestResolveRedirectChain:
+    async def test_resolve_no_redirect(self, monkeypatch):
+        from services.utils import resolve_redirect_chain
+        import httpx
+
+        async def mock_is_safe_url_async(url):
+            return True
+        monkeypatch.setattr("services.utils.is_safe_url_async", mock_is_safe_url_async)
+
+        class DummyResponse:
+            def __init__(self):
+                self.status_code = 200
+                self.headers = {}
+
+        class DummyClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                pass
+            async def head(self, url, timeout):
+                return DummyResponse()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: DummyClient())
+
+        chain = await resolve_redirect_chain("https://www.example.com")
+        assert chain == ["https://www.example.com"]
+
+    async def test_resolve_single_redirect(self, monkeypatch):
+        from services.utils import resolve_redirect_chain
+        import httpx
+
+        async def mock_is_safe_url_async(url):
+            return True
+        monkeypatch.setattr("services.utils.is_safe_url_async", mock_is_safe_url_async)
+
+        calls = []
+
+        class DummyResponse:
+            def __init__(self, status_code, headers):
+                self.status_code = status_code
+                self.headers = headers
+
+        class DummyClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                pass
+            async def head(self, url, timeout):
+                calls.append(url)
+                if url == "https://short.url":
+                    return DummyResponse(301, {"location": "https://final.url"})
+                return DummyResponse(200, {})
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: DummyClient())
+
+        chain = await resolve_redirect_chain("https://short.url")
+        assert chain == ["https://short.url", "https://final.url"]
+        assert len(calls) == 2
+
+    async def test_resolve_unsafe_redirect(self, monkeypatch):
+        from services.utils import resolve_redirect_chain
+        import httpx
+
+        class DummyResponse:
+            def __init__(self, status_code, headers):
+                self.status_code = status_code
+                self.headers = headers
+
+        class DummyClient:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                pass
+            async def head(self, url, timeout):
+                return DummyResponse(301, {"location": "http://127.0.0.1/admin"})
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: DummyClient())
+
+        chain = await resolve_redirect_chain("https://short.url")
+        assert chain == ["https://short.url"]

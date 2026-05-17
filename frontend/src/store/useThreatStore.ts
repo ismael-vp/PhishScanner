@@ -56,17 +56,22 @@ export const useThreatStore = create<ThreatState>()(
             || validatedData.resourceName
             || (validatedData.type === 'url' ? 'URL Desconocida' : 'Archivo Analizado');
 
+          const redirectChain = validatedData.osint_data?.redirect_chain;
+          const finalUrl = (validatedData.type === 'url' && redirectChain && redirectChain.length > 0)
+            ? redirectChain[redirectChain.length - 1]
+            : normalizedName;
+
           // Enriquecemos el resultado con nombre y fecha para el historial
           const enrichedResult: ScanResult = {
             ...validatedData,
-            resourceName: normalizedName,
+            resourceName: finalUrl,
             timestamp: new Date().toISOString()
           } as ScanResult;
 
           // Evitar duplicados consecutivos exactamente iguales y limitar a 10 escaneos
           const newHistory = [
             enrichedResult,
-            ...state.history.filter(h => h.resourceName !== normalizedName)
+            ...state.history.filter(h => h.resourceName !== finalUrl)
           ].slice(0, 10);
 
           return { 

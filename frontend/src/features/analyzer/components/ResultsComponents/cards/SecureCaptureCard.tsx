@@ -15,8 +15,20 @@ export default function SecureCaptureCard({ osintData, safeUrl }: SecureCaptureC
   const [hasError, setHasError] = useState(false);
   const [forceMobileView, setForceMobileView] = useState(false);
 
-  const desktopUrl = osintData?.screenshot_desktop;
-  const mobileUrl = osintData?.screenshot_mobile;
+  // 1. Obtener la URL real de destino (última URL de la cadena o, en su defecto, safeUrl)
+  const resolvedUrl = osintData?.redirect_chain && osintData.redirect_chain.length > 0
+    ? osintData.redirect_chain[osintData.redirect_chain.length - 1]
+    : safeUrl;
+
+  // 2. Reconstruir dinámicamente las URLs de Microlink al vuelo de forma determinista
+  const desktopUrl = resolvedUrl 
+    ? `https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&screenshot=true&meta=false&embed=screenshot.url`
+    : "";
+    
+  const mobileUrl = resolvedUrl
+    ? `https://api.microlink.io/?url=${encodeURIComponent(resolvedUrl)}&screenshot=true&meta=false&embed=screenshot.url&device=iPhone+13`
+    : "";
+
   const isMobileOptimized = osintData?.is_mobile_optimized ?? true;
   
   const currentImageUrl = activeView === 'desktop' ? desktopUrl : mobileUrl;
@@ -113,7 +125,7 @@ export default function SecureCaptureCard({ osintData, safeUrl }: SecureCaptureC
           <div className="flex flex-col items-center justify-center p-8 text-center space-y-3 bg-[#0a0a0a] w-full h-full border border-dashed border-[#222]">
             <Monitor size={32} className="text-[#333]" />
             <p className="text-sm text-[#555] max-w-[280px]">
-              Vista previa no disponible.
+              Captura no disponible.
             </p>
           </div>
         ) : (

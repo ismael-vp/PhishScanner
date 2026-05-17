@@ -242,18 +242,30 @@ class ScriptExplainRequest(BaseModel):
 async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
     """Analiza una URL en busca de phishing, malware y anomalías."""
     try:
-        url_cache_key = hashlib.sha256(request.url.encode()).hexdigest()
+        # 1. Obtener la cadena de redirecciones primero
+        from services.utils import resolve_redirect_chain
+        try:
+            redirect_chain = await resolve_redirect_chain(request.url)
+            final_url = redirect_chain[-1] if redirect_chain else request.url
+        except Exception as exc:
+            logger.error(f"Error resolviendo la cadena de redirecciones para {request.url}, activando fallback: {exc}")
+            redirect_chain = [request.url]
+            final_url = request.url
+
+        # 2. La clave de caché utiliza la URL final resuelta
+        url_cache_key = hashlib.sha256(final_url.encode()).hexdigest()
         cached_result = cache_service.get(url_cache_key, "url")
         if cached_result:
+            # Si hay caché, devolvemos el resultado pero actualizando el redirect_chain para el usuario actual
+            if "osint_data" in cached_result and isinstance(cached_result["osint_data"], dict):
+                cached_result["osint_data"]["redirect_chain"] = redirect_chain
             return cached_result
 
-        # Ejecución en paralelo (Concurrencia) para reducir el tiempo a la mitad.
-        # Además, añadimos tolerancia a fallos: si VirusTotal se cae o excede el límite de cuota,
-        # la plataforma NO debe romperse; pasaremos a depender de nuestra Heurística y OSINT.
+        # Ejecución en paralelo (Concurrencia) usando la URL final
         import asyncio
         results = await asyncio.gather(
-            vt_service.get_url_report(request.url),
-            OSINTService.get_osint_data(request.url),
+            vt_service.get_url_report(final_url),
+            OSINTService.get_osint_data(final_url),
             return_exceptions=True
         )
 
@@ -315,6 +327,10 @@ async def analyze_url(request: URLRequest = Body(...)):  # noqa: B008
             "osint_data": _serialize_osint(osint_data),  # Fix Caos #1+#2
             "status": "success"
         }
+
+        # Sobrescribimos el redirect_chain con la cadena completa para mantener la interfaz visual y la trazabilidad
+        if "osint_data" in result and isinstance(result["osint_data"], dict):
+            result["osint_data"]["redirect_chain"] = redirect_chain
 
         if not has_errors:
             cache_service.set(url_cache_key, result, "url")
